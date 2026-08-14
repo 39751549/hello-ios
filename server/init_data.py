@@ -1,0 +1,149 @@
+# -*- coding: utf-8 -*-
+"""建表 + 初始游戏数据导入"""
+from database import engine, SessionLocal, Base
+import models
+from security import hash_password
+from config import GM_DEFAULT_USER, GM_DEFAULT_PASSWORD, INIT_LEVEL, INIT_GOLD, INIT_DIAMOND, INIT_HP, INIT_ATK, INIT_DEF
+
+# ============ 物品配置 ============
+# (code, name, type, rarity, atk, df, hp, price_gold, price_diamond, color, desc)
+ITEMS = [
+    # ---- 武器 ----
+    ("w_iron",     "铁剑",       "weapon", "common",  12, 0, 0,    200, 0,   "#9aa0a6", "新手铁剑"),
+    ("w_steel",    "精钢长剑",   "weapon", "rare",    30, 0, 0,    800, 0,   "#4a9eff", "锋利的精钢剑"),
+    ("w_flame",    "烈焰之刃",   "weapon", "epic",    70, 0, 50,   0,   200, "#ff7043", "附带火焰之力"),
+    ("w_dragon",   "龙魂巨剑",   "weapon", "legend",  140,0, 120,  0,   600, "#ab47bc", "蕴含龙魂"),
+    ("w_god",      "神灭·天罚",  "weapon", "myth",    280,20,300,  0,   1500,"#ffd54f", "灭世神兵"),
+    ("w_void",     "虚空裂痕",   "weapon", "myth",    320,30,400,  0,   2000,"#ce93d8", "撕裂虚空"),
+    # ---- 防具 ----
+    ("a_cloth",    "布衣",       "armor",  "common",  0,  6, 50,   150, 0,   "#9aa0a6", "普通布衣"),
+    ("a_leather",  "皮甲",       "armor",  "rare",    0,  16,120,  600, 0,   "#4a9eff", "坚韧皮甲"),
+    ("a_iron",     "玄铁甲",     "armor",  "epic",    0,  42,300,  0,   200, "#ff7043", "玄铁锻造"),
+    ("a_dragon",   "龙鳞战甲",   "armor",  "legend",  0,  95,700,  0,   600, "#ab47bc", "龙鳞制成"),
+    ("a_divine",   "神佑圣衣",   "armor",  "myth",    30, 200,1500,0,   1500,"#ffd54f", "神明护佑"),
+    # ---- 皮肤 ----
+    ("s_novice",   "新手装",     "skin",   "common",  0,  0, 0,    0,   0,   "#9aa0a6", "默认外观"),
+    ("s_shadow",   "暗影刺客",   "skin",   "rare",    5,  5, 50,   0,   150, "#4a9eff", "暗影之力"),
+    ("s_flame",    "烈焰战神",   "skin",   "epic",    10, 10,100,  0,   300, "#ff7043", "浴火战神"),
+    ("s_frost",    "冰霜女王",   "skin",   "legend",  15, 15,200,  0,   500, "#26c6da", "冰封万物"),
+    ("s_gold",     "黄金帝王",   "skin",   "myth",    25, 25,300,  0,   1000,"#ffd54f", "至高荣耀"),
+    # ---- 消耗品 ----
+    ("c_hp_s",     "小血药",     "consumable", "common", 0, 0, 0,  50,  0,   "#ef5350", "回复100HP"),
+    ("c_hp_l",     "大血药",     "consumable", "rare",   0, 0, 0,  200, 0,   "#ef5350", "回复500HP"),
+    ("c_atk",      "狂暴药水",   "consumable", "epic",   0, 0, 0,  0,   50,  "#ff7043", "临时攻击+20"),
+]
+
+# ============ Boss 配置 ============
+# (name, level, hp, atk, df, exp, gold, diamond, color, desc, tier, item_rewards)
+BOSSES = [
+    ("哥布林首领",   5,   800,    25,  5,   80,    150,   0, "#8bc34a", "森林里的恶霸",      1, [{"item_id":None,"count":1,"rate":0.3}]),
+    ("野猪王",       8,   1500,   35,  8,   150,   280,   0, "#a1887f", "凶猛的野猪",        1, []),
+    ("石巨人",       12,  3000,   50,  20,  280,   500,   0, "#90a4ae", "坚不可摧",          1, []),
+    ("暗影刺客",     16,  5000,   80,  15,  450,   800,   1, "#5c6bc0", "暗影中的杀手",      2, []),
+    ("火焰恶魔",     22,  9000,   120, 30,  800,   1400,  2, "#ff7043", "烈焰化身",          2, []),
+    ("冰霜巨龙",     30,  18000,  170, 50,  1500,  2600,  3, "#26c6da", "冰封巨龙",          3, []),
+    ("深渊魔王",     40,  35000,  240, 80,  2800,  4800,  5, "#ab47bc", "深渊降临",          3, []),
+    ("远古泰坦",     55,  70000,  340, 130, 5000,  8500,  8, "#8d6e63", "远古之力",          4, []),
+    ("虚空之主",     70,  140000, 480, 200, 9000,  15000, 12,"#ce93d8", "虚空主宰",          4, []),
+    ("世界BOSS·混沌",90,  300000, 700, 320, 18000, 30000, 20,"#ffd54f", "混沌之源",          5, []),
+    ("终焉之神",     100, 600000, 1000,500, 35000, 60000, 40,"#e91e63", "终焉降临",          5, []),
+]
+
+# ============ 奖池配置 ============
+# (name, cost_type, cost_once, cost_ten, desc, [(item_code, weight, count), ...])
+GACHA_POOLS = [
+    ("新手装备池(金币)", "gold", 300, 2700, "基础装备,金币抽取", [
+        ("w_iron", 30, 1), ("w_steel", 15, 1), ("a_cloth", 30, 1), ("a_leather", 15, 1),
+        ("c_hp_s", 25, 3), ("c_hp_l", 10, 1),
+    ]),
+    ("高级装备池(钻石)", "diamond", 50, 450, "稀有装备+皮肤,钻石抽取", [
+        ("w_steel", 25, 1), ("w_flame", 12, 1), ("w_dragon", 4, 1), ("w_god", 1, 1),
+        ("a_leather", 20, 1), ("a_iron", 12, 1), ("a_dragon", 4, 1), ("a_divine", 1, 1),
+        ("s_shadow", 15, 1), ("s_flame", 8, 1), ("s_frost", 3, 1), ("s_gold", 1, 1),
+        ("c_atk", 10, 2),
+    ]),
+    ("神器池(钻石)", "diamond", 100, 900, "传说神话装备,钻石抽取,保底传说", [
+        ("w_dragon", 30, 1), ("w_god", 15, 1), ("w_void", 8, 1),
+        ("a_dragon", 25, 1), ("a_divine", 12, 1),
+        ("s_frost", 15, 1), ("s_gold", 8, 1),
+    ]),
+]
+
+
+def _item_code_to_id(db):
+    return {it.code: it.id for it in db.query(models.Item).all()}
+
+
+def init_items(db):
+    if db.query(models.Item).count() > 0:
+        return
+    for code, name, typ, rar, atk, df, hp, pg, pd, color, desc in ITEMS:
+        db.add(models.Item(
+            code=code, name=name, type=typ, rarity=rar, atk=atk, df=df, hp=hp,
+            price_gold=pg, price_diamond=pd, color=color, desc=desc,
+        ))
+    db.commit()
+
+
+def init_bosses(db):
+    if db.query(models.Boss).count() > 0:
+        return
+    code2id = _item_code_to_id(db)
+    for name, lv, hp, atk, df, exp, gold, dia, color, desc, tier, rewards in BOSSES:
+        item_rewards = []
+        for r in rewards:
+            iid = code2id.get(r["item_id"]) if r["item_id"] else None
+            item_rewards.append({"item_id": iid, "count": r["count"], "rate": r["rate"]})
+        db.add(models.Boss(
+            name=name, level=lv, hp=hp, atk=atk, df=df,
+            exp_reward=exp, gold_reward=gold, diamond_reward=dia,
+            color=color, desc=desc, tier=tier, item_rewards=item_rewards,
+        ))
+    db.commit()
+
+
+def init_gacha(db):
+    if db.query(models.GachaPool).count() > 0:
+        return
+    code2id = _item_code_to_id(db)
+    for name, ct, c1, c10, desc, items in GACHA_POOLS:
+        pool = models.GachaPool(name=name, cost_type=ct, cost_once=c1, cost_ten=c10, desc=desc)
+        db.add(pool)
+        db.commit()
+        db.refresh(pool)
+        for code, w, cnt in items:
+            iid = code2id.get(code)
+            if iid:
+                db.add(models.GachaItem(pool_id=pool.id, item_id=iid, weight=w, count=cnt))
+        db.commit()
+
+
+def init_gm(db):
+    if db.query(models.GmUser).count() == 0:
+        db.add(models.GmUser(
+            username=GM_DEFAULT_USER,
+            password_hash=hash_password(GM_DEFAULT_PASSWORD),
+        ))
+        db.commit()
+
+
+def init_all():
+    print(">>> 创建数据表...")
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        init_items(db)
+        print(f"   物品: {db.query(models.Item).count()} 条")
+        init_bosses(db)
+        print(f"   Boss: {db.query(models.Boss).count()} 条")
+        init_gacha(db)
+        print(f"   奖池: {db.query(models.GachaPool).count()} 个")
+        init_gm(db)
+        print(f"   GM账号: {db.query(models.GmUser).count()} 个")
+        print(">>> 初始化完成")
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    init_all()
