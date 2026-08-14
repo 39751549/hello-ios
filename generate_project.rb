@@ -31,5 +31,10 @@ target.build_configurations.each do |config|
   settings.each { |k, v| config.build_settings[k] = v }
 end
 
+# 创建 shared scheme,使 xcodebuild -scheme 可用
+scheme = Xcodeproj::XCScheme.new
+scheme.add_build_target(target)
+scheme.save_as('HelloApp.xcodeproj', 'HelloApp', true)
+
 project.save
 puts 'Generated HelloApp.xcodeproj'
