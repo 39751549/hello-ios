@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# XcodeGen 生成物
+HelloApp.xcodeproj
+
+# 打包产物
+Payload/
+*.ipa
+
+# Theos / 其他
+.theos/
+obj/
