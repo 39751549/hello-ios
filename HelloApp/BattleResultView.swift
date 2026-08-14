@@ -157,7 +157,7 @@ final class BattleResultView: UIViewController {
         // 入场动画
         cardView.transform = CGAffineTransform(scaleX: 0.7, y: 0.7)
         cardView.alpha = 0
-        UIView.animate(withDuration: 0.4, usingSpringWithDamping: 0.6, initialSpringVelocity: 0.5) {
+        UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.6, initialSpringVelocity: 0.5, options: []) {
             self.cardView.transform = .identity
             self.cardView.alpha = 1
         }
