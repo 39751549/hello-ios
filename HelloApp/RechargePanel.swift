@@ -7,6 +7,9 @@ final class RechargePanel: BasePanel {
     private let infoLabel = UILabel.make("", font: .systemFont(ofSize: 13), color: UIColor(hex: 0xcfd8e3), alignment: .center)
     private let packagesView = UIView()
 
+    init() { super.init(title: "充值中心") }
+    required init?(coder: NSCoder) { fatalError() }
+
     override func setupContent() {
         super.setupContent()
         let gemIcon = UILabel.make("💎", font: .systemFont(ofSize: 64), color: .white, alignment: .center)
