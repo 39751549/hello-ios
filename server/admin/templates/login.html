@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GM 后台 · 登录</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    min-height: 100vh; display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(circle at 30% 20%, #1e3a5f 0%, #0a0e1a 60%);
+    color:#e0e6ed;
+  }
+  .card {
+    width: 380px; padding: 40px 32px;
+    background: rgba(26,32,44,0.85); backdrop-filter: blur(12px);
+    border: 1px solid rgba(74,158,255,0.25); border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .logo { text-align:center; margin-bottom: 28px; }
+  .logo h1 { font-size: 26px; background: linear-gradient(90deg,#4a9eff,#9c6bff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing:2px; }
+  .logo p { font-size: 12px; color:#6b7a8f; margin-top:6px; letter-spacing:4px; }
+  .field { margin-bottom: 20px; }
+  .field label { display:block; font-size:13px; color:#8b9bb4; margin-bottom:8px; }
+  .field input {
+    width:100%; padding: 12px 14px; font-size:15px;
+    background: rgba(15,20,30,0.8); border:1px solid rgba(74,158,255,0.2);
+    border-radius: 8px; color:#e0e6ed; outline:none; transition:.2s;
+  }
+  .field input:focus { border-color:#4a9eff; box-shadow:0 0 0 3px rgba(74,158,255,0.15); }
+  .btn {
+    width:100%; padding: 13px; font-size:15px; font-weight:600; cursor:pointer;
+    background: linear-gradient(90deg,#4a9eff,#6b5bff); border:none; border-radius:8px;
+    color:#fff; transition:.2s; letter-spacing:2px;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow:0 8px 24px rgba(74,158,255,0.35); }
+  .err { color:#ef5350; font-size:13px; text-align:center; margin-bottom:14px; min-height:18px; }
+  .tip { text-align:center; margin-top:18px; font-size:12px; color:#4a5568; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <h1>GAME GM</h1>
+      <p>管理后台</p>
+    </div>
+    {% if error %}<div class="err">{{ error }}</div>{% else %}<div class="err"></div>{% endif %}
+    <form method="post" action="/admin/login">
+      <div class="field">
+        <label>账号</label>
+        <input type="text" name="username" placeholder="admin" autocomplete="off" required>
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input type="password" name="password" placeholder="admin" required>
+      </div>
+      <button type="submit" class="btn">登 录</button>
+    </form>
+    <div class="tip">默认账号 admin / admin</div>
+  </div>
+</body>
+</html>
