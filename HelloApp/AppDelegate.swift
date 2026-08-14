@@ -10,9 +10,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = UINavigationController(rootViewController: ViewController())
+        let root: UIViewController
+        if APIClient.shared.token != nil {
+            root = GameViewController()
+        } else {
+            root = AuthViewController()
+        }
+        window.rootViewController = root
         window.makeKeyAndVisible()
         self.window = window
         return true
+    }
+
+    func supportedInterfaceOrientations(for window: UIWindow?) -> UIInterfaceOrientationMask {
+        return .landscape
     }
 }
