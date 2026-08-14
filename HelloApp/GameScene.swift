@@ -317,7 +317,7 @@ final class GameScene: SCNScene {
             let dy = Float.random(in: -0.3...1) * speed + gravityY
             let dz = Float.random(in: -1...1) * speed
             let move = SCNAction.moveBy(x: CGFloat(dx), y: CGFloat(dy), z: CGFloat(dz), duration: duration)
-            let fade = SCNAction.fadeOut(withDuration: duration)
+            let fade = SCNAction.fadeOut(duration: duration)
             p.runAction(SCNAction.group([move, fade, SCNAction.scale(to: 0.01, duration: duration)]))
         }
         // 结束后移除容器
@@ -697,7 +697,7 @@ final class GameScene: SCNScene {
                 // 怪物倒下消散
                 let fall = SCNAction.sequence([
                     SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.3),
-                    SCNAction.fadeOut(withDuration: 0.35),
+                    SCNAction.fadeOut(duration: 0.35),
                     SCNAction.customAction(duration: 0) { node, _ in
                         node.isHidden = true
                     }
@@ -735,7 +735,7 @@ final class GameScene: SCNScene {
             ]),
             SCNAction.sequence([
                 SCNAction.wait(duration: 0.15),
-                SCNAction.fadeOut(withDuration: 0.7),
+                SCNAction.fadeOut(duration: 0.7),
             ]),
             SCNAction.sequence([
                 SCNAction.scale(to: CGFloat(scale * 1.2), duration: 0.1),
@@ -756,7 +756,7 @@ final class GameScene: SCNScene {
         setMonsterHp(idx: monsterIdx, pct: 1.0)
         // 重生淡入
         m.node.opacity = 0
-        m.node.runAction(SCNAction.fadeIn(withDuration: 0.5))
+        m.node.runAction(SCNAction.fadeIn(duration: 0.5))
     }
 
     func setPlayerHp(pct: CGFloat) {
@@ -765,7 +765,7 @@ final class GameScene: SCNScene {
         let w = playerHpWidth
         let action = SCNAction.customAction(duration: 0.3) { node, t in
             let cur = start + (target - start) * CGFloat(t)
-            node.scale.x = cur
+            node.scale.x = Float(cur)
             let newW = w * cur
             node.position = SCNVector3(Float(-(w - newW) / 2), 0, 0.001)
         }
@@ -781,7 +781,7 @@ final class GameScene: SCNScene {
         let target = max(0, min(1, pct))
         let action = SCNAction.customAction(duration: 0.3) { node, t in
             let cur = start + (target - start) * CGFloat(t)
-            node.scale.x = cur
+            node.scale.x = Float(cur)
             let newW = w * cur
             node.position = SCNVector3(Float(-(w - newW) / 2), 0, 0.001)
         }
@@ -807,7 +807,7 @@ final class GameScene: SCNScene {
         let action = SCNAction.sequence([
             SCNAction.group([
                 SCNAction.moveBy(x: 0, y: 1.5, z: 0, duration: 1.2),
-                SCNAction.fadeOut(withDuration: 1.2),
+                SCNAction.fadeOut(duration: 1.2),
             ]),
             SCNAction.removeFromParentNode(),
         ])
