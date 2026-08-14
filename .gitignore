@@ -16,6 +16,11 @@ HelloApp.xcodeproj
 Payload/
 *.ipa
 
+# Python venv
+server/venv/
+__pycache__/
+*.pyc
+
 # Theos / 其他
 .theos/
 obj/
