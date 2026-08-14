@@ -134,6 +134,7 @@ final class GameScene: SCNScene {
     private func makeGroundTexture() -> UIImage {
         let size = CGSize(width: 256, height: 256)
         return UIGraphicsImageRenderer(size: size).image { ctx in
+            let cg = ctx.cgContext
             UIColor(hex: 0x2a4a2e).setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
             // 草纹噪点
@@ -141,16 +142,16 @@ final class GameScene: SCNScene {
                 let x = CGFloat.random(in: 0..<size.width)
                 let y = CGFloat.random(in: 0..<size.height)
                 let r = CGFloat.random(in: 1...3)
-                UIColor(hex: 0x3a5d3e).withAlphaComponent(0.5).setFill()
-                ctx.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
+                cg.setFillColor(UIColor(hex: 0x3a5d3e).withAlphaComponent(0.5).cgColor)
+                cg.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
             }
             // 一些暗纹
             for _ in 0..<200 {
                 let x = CGFloat.random(in: 0..<size.width)
                 let y = CGFloat.random(in: 0..<size.height)
                 let r = CGFloat.random(in: 0.5...1.5)
-                UIColor(hex: 0x1a2e1c).setFill()
-                ctx.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
+                cg.setFillColor(UIColor(hex: 0x1a2e1c).cgColor)
+                cg.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
             }
         }
     }
@@ -267,155 +268,90 @@ final class GameScene: SCNScene {
         return cloud
     }
 
-    // MARK: - 环境萤火虫粒子
+    // MARK: - 环境萤火虫(用小型发光球体节点模拟)
     private func setupFireflies() {
-        let ps = SCNParticleSystem()
-        ps.particleColor = UIColor(hex: 0xffe082)
-        ps.particleColorVariation = SCNVector4(0.2, 0.2, 0.0, 0.0)
-        ps.emitterShape = SCNBox(width: CGFloat(mapHalf*2), height: 8, length: CGFloat(mapHalf*2), chamferRadius: 0)
-        ps.particleSize = 0.18
-        ps.particleCount = 40
-        ps.particleLifeDuration = 8
-        ps.particleLifeDurationVariation = 4
-        ps.particleVelocity = 0.3
-        ps.particleVelocityVariation = 0.2
-        ps.isParticleColorLockedToEmitter = false
-        ps.blendMode = .additive
-        ps.particleIntensity = 1.2
-        ps.particleBounces = false
-        ps.sortingMode = .none
-        // 闪烁效果
-        ps.particleIntensityVariation = 0.6
-        let node = SCNNode()
-        node.position = SCNVector3(0, 4, 0)
-        node.addParticleSystem(ps)
-        rootNode.addChildNode(node)
+        for _ in 0..<25 {
+            let geo = SCNSphere(radius: 0.08)
+            let m = SCNMaterial()
+            m.diffuse.contents = UIColor(hex: 0xffe082)
+            m.emission.contents = UIColor(hex: 0xffe082)
+            m.lightingModel = .constant
+            geo.materials = [m]
+            let n = SCNNode(geometry: geo)
+            let x = Float.random(in: -mapHalf...mapHalf)
+            let y = Float.random(in: 1...6)
+            let z = Float.random(in: -mapHalf...mapHalf)
+            n.position = SCNVector3(x, y, z)
+            n.opacity = 0.7
+            rootNode.addChildNode(n)
+            // 缓慢漂浮 + 闪烁
+            let floatUp = SCNAction.moveBy(x: CGFloat(Float.random(in: -2...2)), y: CGFloat(Float.random(in: 1...3)), z: CGFloat(Float.random(in: -2...2)), duration: TimeInterval(Float.random(in: 6...12)))
+            let floatBack = floatUp.reversed()
+            let pulse = SCNAction.sequence([
+                SCNAction.fadeOpacity(to: 0.2, duration: 1.5),
+                SCNAction.fadeOpacity(to: 0.8, duration: 1.5),
+            ])
+            n.runAction(SCNAction.repeatForever(SCNAction.sequence([floatUp, floatBack])))
+            n.runAction(SCNAction.repeatForever(pulse))
+        }
+    }
+
+    // MARK: - 通用粒子生成器(基于节点,兼容性最佳)
+    /// 生成 count 个小球,向随机方向飞散并淡出
+    private func spawnNodeParticles(at pos: SCNVector3, color: UIColor, count: Int, speed: Float, duration: TimeInterval, size: CGFloat, gravityY: Float = 0) {
+        let container = SCNNode()
+        container.position = pos
+        rootNode.addChildNode(container)
+        for _ in 0..<count {
+            let geo = SCNSphere(radius: size)
+            let m = SCNMaterial()
+            m.diffuse.contents = color
+            m.emission.contents = color
+            m.lightingModel = .constant
+            geo.materials = [m]
+            let p = SCNNode(geometry: geo)
+            p.position = SCNVector3(0, 0, 0)
+            container.addChildNode(p)
+            // 随机方向
+            let dx = Float.random(in: -1...1) * speed
+            let dy = Float.random(in: -0.3...1) * speed + gravityY
+            let dz = Float.random(in: -1...1) * speed
+            let move = SCNAction.moveBy(x: CGFloat(dx), y: CGFloat(dy), z: CGFloat(dz), duration: duration)
+            let fade = SCNAction.fadeOut(withDuration: duration)
+            p.runAction(SCNAction.group([move, fade, SCNAction.scale(to: 0.01, duration: duration)]))
+        }
+        // 结束后移除容器
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) {
+            container.removeFromParentNode()
+        }
     }
 
     // MARK: - 战斗粒子特效
     /// 受击火花
     func spawnHitSparks(at pos: SCNVector3, color: UIColor = .gold) {
-        let ps = SCNParticleSystem()
-        ps.particleColor = color
-        ps.particleColorVariation = SCNVector4(0.3, 0.2, 0.0, 0.1)
-        ps.particleSize = 0.12
-        ps.particleCount = 16
-        ps.particleLifeDuration = 0.4
-        ps.particleLifeDurationVariation = 0.15
-        ps.particleVelocity = 4
-        ps.particleVelocityVariation = 2
-        ps.particleAngleVariation = 360
-        ps.spreadingAngle = 180
-        ps.blendMode = .additive
-        ps.particleBounces = false
-        ps.emitterShape = nil
-        let node = SCNNode()
-        node.position = pos
-        node.addParticleSystem(ps)
-        rootNode.addChildNode(node)
-        // 0.6秒后移除
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            node.removeParticleSystem(ps)
-            node.removeFromParentNode()
-        }
+        spawnNodeParticles(at: pos, color: color, count: 12, speed: 3, duration: 0.4, size: 0.06, gravityY: 1)
     }
 
     /// 死亡爆裂
     func spawnDeathBurst(at pos: SCNVector3, color: UIColor) {
-        let ps = SCNParticleSystem()
-        ps.particleColor = color
-        ps.particleColorVariation = SCNVector4(0.3, 0.3, 0.3, 0.2)
-        ps.particleSize = 0.2
-        ps.particleCount = 30
-        ps.particleLifeDuration = 0.9
-        ps.particleVelocity = 6
-        ps.particleVelocityVariation = 3
-        ps.spreadingAngle = 180
-        ps.particleAngleVariation = 360
-        ps.blendMode = .additive
-        ps.particleBounces = false
-        ps.particleMass = 0.5
-        ps.particleGravity = SCNVector3(0, -3, 0)
-        let node = SCNNode()
-        node.position = pos
-        node.addParticleSystem(ps)
-        rootNode.addChildNode(node)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            node.removeParticleSystem(ps)
-            node.removeFromParentNode()
-        }
+        spawnNodeParticles(at: pos, color: color, count: 24, speed: 5, duration: 0.9, size: 0.1, gravityY: -1)
     }
 
-    /// 升级金光
+    /// 升级金光(向上飘)
     func spawnLevelUpBurst(at pos: SCNVector3) {
-        let ps = SCNParticleSystem()
-        ps.particleColor = UIColor.gold
-        ps.particleColorVariation = SCNVector4(0.1, 0.1, 0.0, 0.1)
-        ps.particleSize = 0.25
-        ps.particleCount = 40
-        ps.particleLifeDuration = 1.2
-        ps.particleVelocity = 5
-        ps.particleVelocityVariation = 2
-        ps.particleAngleVariation = 360
-        ps.blendMode = .additive
-        ps.particleBounces = false
-        ps.particleMass = 0.3
-        ps.particleGravity = SCNVector3(0, 4, 0) // 向上飘
-        let node = SCNNode()
-        node.position = pos
-        node.addParticleSystem(ps)
-        rootNode.addChildNode(node)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            node.removeParticleSystem(ps)
-            node.removeFromParentNode()
-        }
+        spawnNodeParticles(at: pos, color: .gold, count: 30, speed: 4, duration: 1.2, size: 0.12, gravityY: 4)
     }
 
-    /// 治疗光环
+    /// 治疗光环(向上飘)
     func spawnHealEffect(at pos: SCNVector3) {
-        let ps = SCNParticleSystem()
-        ps.particleColor = UIColor(hex: 0x66bb6a)
-        ps.particleColorVariation = SCNVector4(0.0, 0.2, 0.0, 0.1)
-        ps.particleSize = 0.2
-        ps.particleCount = 25
-        ps.particleLifeDuration = 1.0
-        ps.particleVelocity = 2
-        ps.particleVelocityVariation = 1
-        ps.blendMode = .additive
-        ps.particleBounces = false
-        ps.particleGravity = SCNVector3(0, 3, 0)
-        let node = SCNNode()
-        node.position = pos
-        node.addParticleSystem(ps)
-        rootNode.addChildNode(node)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            node.removeParticleSystem(ps)
-            node.removeFromParentNode()
-        }
+        spawnNodeParticles(at: pos, color: UIColor(hex: 0x66bb6a), count: 20, speed: 2, duration: 1.0, size: 0.1, gravityY: 3)
     }
 
     /// 烈焰技能特效
     func spawnFlameSkill(at pos: SCNVector3) {
-        let ps = SCNParticleSystem()
-        ps.particleColor = UIColor(hex: 0xff5722)
-        ps.particleColorVariation = SCNVector4(0.3, 0.2, 0.0, 0.1)
-        ps.particleSize = 0.3
-        ps.particleCount = 50
-        ps.particleLifeDuration = 0.8
-        ps.particleVelocity = 7
-        ps.particleVelocityVariation = 3
-        ps.particleAngleVariation = 360
-        ps.spreadingAngle = 60
-        ps.blendMode = .additive
-        ps.particleBounces = false
-        let node = SCNNode()
-        node.position = pos
-        node.addParticleSystem(ps)
-        rootNode.addChildNode(node)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            node.removeParticleSystem(ps)
-            node.removeFromParentNode()
-        }
+        spawnNodeParticles(at: pos, color: UIColor(hex: 0xff5722), count: 35, speed: 6, duration: 0.8, size: 0.14, gravityY: 2)
+        // 额外加一些黄色火星
+        spawnNodeParticles(at: pos, color: UIColor(hex: 0xffd54f), count: 15, speed: 4, duration: 0.6, size: 0.08, gravityY: 1)
     }
 
     // MARK: - 玩家
@@ -477,7 +413,7 @@ final class GameScene: SCNScene {
 
         // 玩家跟随点光源(温暖色调,营造氛围)
         let pLight = SCNLight()
-        pLight.type = .point
+        pLight.type = .omni
         pLight.color = UIColor(hex: 0xffe0b2, alpha: 0.9)
         pLight.intensity = 900
         pLight.castsShadow = false
@@ -706,15 +642,15 @@ final class GameScene: SCNScene {
             SCNAction.run { node in
                 if let mat = node.geometry?.materials.first { mat.emission.contents = UIColor.white }
             },
-            SCNAction.wait(forDuration: 0.07),
+            SCNAction.wait(duration: 0.07),
             SCNAction.run { node in
                 if let mat = node.geometry?.materials.first { mat.emission.contents = origEmission }
             },
-            SCNAction.wait(forDuration: 0.07),
+            SCNAction.wait(duration: 0.07),
             SCNAction.run { node in
                 if let mat = node.geometry?.materials.first { mat.emission.contents = UIColor.white }
             },
-            SCNAction.wait(forDuration: 0.07),
+            SCNAction.wait(duration: 0.07),
             SCNAction.run { node in
                 if let mat = node.geometry?.materials.first { mat.emission.contents = origEmission }
             },
@@ -754,7 +690,7 @@ final class GameScene: SCNScene {
         let back = SCNAction.move(to: origPos, duration: 0.3)
         back.timingMode = .easeInEaseOut
 
-        playerNode.runAction(SCNAction.sequence([rush, hitImpact, SCNAction.wait(forDuration: 0.5), back])) {
+        playerNode.runAction(SCNAction.sequence([rush, hitImpact, SCNAction.wait(duration: 0.5), back])) {
             if win {
                 // 死亡爆裂粒子
                 self.spawnDeathBurst(at: monsterTop, color: m.color)
@@ -798,7 +734,7 @@ final class GameScene: SCNScene {
                 SCNAction.moveBy(x: 0, y: 1.0, z: 0, duration: 0.7),
             ]),
             SCNAction.sequence([
-                SCNAction.wait(forDuration: 0.15),
+                SCNAction.wait(duration: 0.15),
                 SCNAction.fadeOut(withDuration: 0.7),
             ]),
             SCNAction.sequence([
