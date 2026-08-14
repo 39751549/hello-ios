@@ -85,7 +85,7 @@ final class MinimapView: UIView {
         // 怪物点(相对玩家)
         for d in dots {
             let rx = (d.x - playerPos.x) * scale
-            let rz = (d.z - playerPos.z) * scale
+            let rz = (d.z - playerPos.y) * scale
             let px = cx + CGFloat(rx)
             let py = cy - CGFloat(rz) // z 向上 = 屏幕向上
             // 只画在范围内的
