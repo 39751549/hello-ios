@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 // MARK: - 通用响应
 struct ApiResponse<T: Decodable>: Decodable {
