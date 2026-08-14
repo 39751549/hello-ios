@@ -27,9 +27,10 @@ jobs:
 
       - name: Build (Release, no signing)
         run: |
+          set -o pipefail
           xcodebuild \
             -project HelloApp.xcodeproj \
-            -target HelloApp \
+            -scheme HelloApp \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -37,7 +38,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_ENTITLEMENTS="" \
-            build | tail -120
+            build | tail -150
 
       - name: Package IPA
         run: |
