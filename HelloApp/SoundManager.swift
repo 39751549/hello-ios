@@ -2,223 +2,226 @@ import Foundation
 import AVFoundation
 
 /// 程序化音效系统(无需音频文件,实时合成)
-/// 安全要点:
-/// 1) AVAudioEngine 非线程安全 → 所有引擎图操作在主线程串行执行
-/// 2) 引擎启动延迟到首次播放,且全部 do-catch,绝不抛出(避免任何设备上闪退)
-/// 3) 引擎不可用时 play() 静默返回
-/// 4) 主线程串行队列 + player 生命周期标记,杜绝重入/detach 已分离节点导致的崩溃
+///
+/// 安全设计:
+/// 1) 放弃 AVAudioEngine(其 start() 在无连接节点时抛 NSException,Swift 无法 catch)
+/// 2) 改用 AVAudioPlayer(data:) —— init 返回 Optional,绝不抛 NSException
+/// 3) 启动时预生成所有音效的 WAV Data 缓存,播放时直接用
+/// 4) AVAudioPlayer 在主线程创建/play,播放完成自动回收
 final class SoundManager {
     static let shared = SoundManager()
-    private let engine = AVAudioEngine()
+
     private var enabled = true
-    private var started = false
-    private var startAttempted = false
-    /// 主线程串行队列: 所有引擎图操作排队执行,避免并发 attach/detach
-    private let graphQueue = DispatchQueue.main
-    /// 当前活跃的 player 节点(用于安全 detach)
-    private var activePlayers: [ObjectIdentifier: AVAudioPlayerNode] = [:]
+    /// 预生成的 WAV Data 缓存(每个音效一份)
+    private var wavCache: [SFX: Data] = [:]
+    /// 活跃的 player(防止被回收导致静音)
+    private var activePlayers: [AVAudioPlayer] = []
+    private let cacheLock = NSLock()
 
     private init() {
-        // 不在 init 里碰 AVAudioSession/引擎启动, 避免任何启动期异常
-        // 监听音频中断,做最起码的恢复
-        NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification,
-            object: nil, queue: .main
-        ) { [weak self] note in
-            guard let self = self else { return }
-            guard let info = note.userInfo,
-                  let typeRaw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
-            if type == .began {
-                self.engine.pause()
-            } else if type == .ended {
-                if self.started, !self.engine.isRunning {
-                    try? self.engine.start()
-                }
-            }
+        // 后台预生成所有音效 WAV Data(不阻塞主线程)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.preGenerateAll()
         }
     }
 
     func setEnabled(_ on: Bool) {
         enabled = on
-        if !on { graphQueue.async { [weak self] in self?.engine.pause() } }
     }
 
     // MARK: - 音效类型
-    enum SFX: String {
+    enum SFX: String, CaseIterable {
         case attack, hit, skill, aoe, levelup, coin, death, heal, button, error
     }
 
+    // MARK: - 预生成
+    private func preGenerateAll() {
+        for sfx in SFX.allCases {
+            guard wavCache[sfx] == nil else { continue }
+            if let wav = generateWavData(sfx) {
+                cacheLock.lock()
+                wavCache[sfx] = wav
+                cacheLock.unlock()
+            }
+        }
+    }
+
+    // MARK: - 播放
     func play(_ sfx: SFX) {
         guard enabled else { return }
-        // 后台合成 buffer(纯计算)
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let buffer = self.synthesize(sfx)
-            // 引擎操作切主线程串行队列
-            self.graphQueue.async { [weak self] in
-                self?.playBuffer(buffer)
+        // 取 WAV Data(缓存命中或现场生成)
+        cacheLock.lock()
+        let wav = wavCache[sfx]
+        cacheLock.unlock()
+        if let wav = wav {
+            DispatchQueue.main.async { [weak self] in
+                self?.playWavData(wav)
+            }
+        } else {
+            // 缓存未命中,后台生成后主线程播放
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self, let wav = self.generateWavData(sfx) else { return }
+                self.cacheLock.lock()
+                self.wavCache[sfx] = wav
+                self.cacheLock.unlock()
+                DispatchQueue.main.async { [weak self] in
+                    self?.playWavData(wav)
+                }
             }
         }
     }
 
-    /// 首次播放时尝试启动引擎(只试一次, 失败永久静音)
-    private func ensureStarted() {
-        guard !startAttempted else { return }
-        startAttempted = true
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-            try engine.start()
-            started = true
-        } catch {
-            print("[Sound] 引擎启动失败(将静音): \(error)")
-            started = false
+    private func playWavData(_ data: Data) {
+        guard enabled else { return }
+        // AVAudioPlayer(data:) 返回 Optional,不抛 NSException
+        guard let player = try? AVAudioPlayer(data: data) else { return }
+        player.volume = 0.55
+        player.prepareToPlay()
+        activePlayers.append(player)
+        player.play()
+        // 播放完成后移除引用(延迟一点确保播完)
+        let dur = player.duration + 0.3
+        DispatchQueue.main.asyncAfter(deadline: .now() + dur) { [weak self] in
+            guard let self = self else { return }
+            if let idx = self.activePlayers.firstIndex(where: { $0 === player }) {
+                self.activePlayers.remove(at: idx)
+            }
+        }
+        // 清理过多的活跃 player(防止异常堆积)
+        if activePlayers.count > 16 {
+            let toRemove = activePlayers.prefix(activePlayers.count - 12)
+            activePlayers.removeFirst(toRemove.count)
         }
     }
 
-    // MARK: - 合成(任意线程, 不接触引擎)
-    private func synthesize(_ sfx: SFX) -> AVAudioPCMBuffer? {
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1) else { return nil }
-        let frameCount: AVAudioFrameCount
-        let fill: (UnsafeMutablePointer<Float>) -> Void
+    // MARK: - 生成 WAV Data(从合成的 float32 PCM 样本)
+    private func generateWavData(_ sfx: SFX) -> Data? {
+        let sampleRate: UInt32 = 44100
+        let channels: UInt16 = 1
+        let bitsPerSample: UInt16 = 32  // IEEE float
 
+        // 合成 PCM 样本
+        let samples = synthesizeSamples(sfx)
+        guard !samples.isEmpty else { return nil }
+
+        let frameCount = UInt32(samples.count)
+        let bytesPerFrame = UInt32(channels) * UInt32(bitsPerSample) / 8
+        let dataSize = frameCount * bytesPerFrame
+        let byteRate = sampleRate * bytesPerFrame
+        let blockAlign = channels * (bitsPerSample / 8)
+
+        var data = Data()
+        data.reserveCapacity(Int(44 + dataSize))
+
+        // RIFF header
+        data.append("RIFF".data(using: .ascii)!)
+        appendUInt32(&data, 36 + dataSize)
+        data.append("WAVE".data(using: .ascii)!)
+        // fmt chunk
+        data.append("fmt ".data(using: .ascii)!)
+        appendUInt32(&data, 16)           // chunk size
+        appendUInt16(&data, 3)            // IEEE float (format code 3)
+        appendUInt16(&data, channels)
+        appendUInt32(&data, sampleRate)
+        appendUInt32(&data, byteRate)
+        appendUInt16(&data, blockAlign)
+        appendUInt16(&data, bitsPerSample)
+        // data chunk
+        data.append("data".data(using: .ascii)!)
+        appendUInt32(&data, dataSize)
+        // PCM samples (float32 little-endian)
+        for s in samples {
+            var v = s
+            withUnsafeBytes(of: &v) { data.append(contentsOf: $0) }
+        }
+        return data
+    }
+
+    private func appendUInt32(_ data: inout Data, _ v: UInt32) {
+        var x = v.littleEndian
+        withUnsafeBytes(of: &x) { data.append(contentsOf: $0) }
+    }
+    private func appendUInt16(_ data: inout Data, _ v: UInt16) {
+        var x = v.littleEndian
+        withUnsafeBytes(of: &x) { data.append(contentsOf: $0) }
+    }
+
+    // MARK: - 合成 PCM 样本(纯计算,任意线程)
+    private func synthesizeSamples(_ sfx: SFX) -> [Float] {
         switch sfx {
         case .attack:
-            frameCount = 4400
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    let freq = 1200 - 900 * t / 0.1
-                    buf[i] = Float(exp(-t * 30) * sin(2 * .pi * freq * t) * 0.3)
-                }
+            let n = 4400
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                let freq = 1200 - 900 * t / 0.1
+                return Float(exp(-t * 30) * sin(2 * .pi * freq * t) * 0.3)
             }
         case .hit:
-            frameCount = 3000
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    let env = exp(-t * 40)
-                    let noise = Double.random(in: -1...1) * 0.4
-                    let tone = sin(2 * .pi * 200 * t) * 0.3
-                    buf[i] = Float(env * (noise + tone) * 0.5)
-                }
+            let n = 3000
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                let env = exp(-t * 40)
+                let noise = Double.random(in: -1...1) * 0.4
+                let tone = sin(2 * .pi * 200 * t) * 0.3
+                return Float(env * (noise + tone) * 0.5)
             }
         case .skill:
-            frameCount = 8800
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    let freq = 300 + 800 * t / 0.2
-                    buf[i] = Float(exp(-t * 12) * sin(2 * .pi * freq * t) * 0.35)
-                }
+            let n = 8800
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                let freq = 300 + 800 * t / 0.2
+                return Float(exp(-t * 12) * sin(2 * .pi * freq * t) * 0.35)
             }
         case .aoe:
-            frameCount = 13200
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    let env = exp(-t * 8)
-                    let low = sin(2 * .pi * 80 * t) * 0.5
-                    let noise = Double.random(in: -1...1) * 0.3
-                    buf[i] = Float(env * (low + noise) * 0.6)
-                }
+            let n = 13200
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                let env = exp(-t * 8)
+                let low = sin(2 * .pi * 80 * t) * 0.5
+                let noise = Double.random(in: -1...1) * 0.3
+                return Float(env * (low + noise) * 0.6)
             }
         case .levelup:
-            frameCount = 22000
-            fill = { buf in
-                let notes: [Double] = [523, 659, 784, 1047]
-                let noteLen = Int(frameCount) / notes.count
-                for i in 0..<Int(frameCount) {
-                    let noteIdx = min(i / noteLen, notes.count - 1)
-                    let localT = Double(i % noteLen) / 44100.0
-                    buf[i] = Float(exp(-localT * 4) * sin(2 * .pi * notes[noteIdx] * localT) * 0.3)
-                }
+            let n = 22000
+            let notes: [Double] = [523, 659, 784, 1047]
+            let noteLen = n / notes.count
+            return (0..<n).map { i in
+                let noteIdx = min(i / noteLen, notes.count - 1)
+                let localT = Double(i % noteLen) / 44100.0
+                return Float(exp(-localT * 4) * sin(2 * .pi * notes[noteIdx] * localT) * 0.3)
             }
         case .coin:
-            frameCount = 6000
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    buf[i] = Float(exp(-t * 10) * (sin(2 * .pi * 1318 * t) + sin(2 * .pi * 1976 * t)) * 0.15)
-                }
+            let n = 6000
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                return Float(exp(-t * 10) * (sin(2 * .pi * 1318 * t) + sin(2 * .pi * 1976 * t)) * 0.15)
             }
         case .death:
-            frameCount = 11000
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    let freq = 200 - 150 * t / 0.25
-                    buf[i] = Float(exp(-t * 6) * sin(2 * .pi * freq * t) * 0.4)
-                }
+            let n = 11000
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                let freq = 200 - 150 * t / 0.25
+                return Float(exp(-t * 6) * sin(2 * .pi * freq * t) * 0.4)
             }
         case .heal:
-            frameCount = 10000
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    let freq = 400 + 300 * t / 0.23
-                    buf[i] = Float(sin(.pi * t / 0.23) * sin(2 * .pi * freq * t) * 0.25)
-                }
+            let n = 10000
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                let freq = 400 + 300 * t / 0.23
+                return Float(sin(.pi * t / 0.23) * sin(2 * .pi * freq * t) * 0.25)
             }
         case .button:
-            frameCount = 1500
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    buf[i] = Float(exp(-t * 60) * sin(2 * .pi * 800 * t) * 0.2)
-                }
+            let n = 1500
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                return Float(exp(-t * 60) * sin(2 * .pi * 800 * t) * 0.2)
             }
         case .error:
-            frameCount = 8000
-            fill = { buf in
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / 44100.0
-                    buf[i] = Float(exp(-t * 8) * sin(2 * .pi * 150 * t) * 0.3)
-                }
+            let n = 8000
+            return (0..<n).map { i in
+                let t = Double(i) / 44100.0
+                return Float(exp(-t * 8) * sin(2 * .pi * 150 * t) * 0.3)
             }
-        }
-
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return nil }
-        buffer.frameLength = frameCount
-        guard let channelData = buffer.floatChannelData else { return nil }
-        fill(channelData[0])
-        return buffer
-    }
-
-    // MARK: - 播放(主线程串行)
-    private func playBuffer(_ buffer: AVAudioPCMBuffer?) {
-        guard enabled else { return }
-        ensureStarted()
-        guard let buffer = buffer, started, engine.isRunning else { return }
-        let player = AVAudioPlayerNode()
-        let key = ObjectIdentifier(player)
-        // attach/connect/play 全部在同一主线程串行队列里完成
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: buffer.format)
-        activePlayers[key] = player
-        player.scheduleBuffer(buffer) { [weak self] in
-            // 播放完成回调(可能在引擎内部线程) → 切回主线程清理
-            self?.graphQueue.async { [weak self] in
-                self?.teardownPlayer(key: key)
-            }
-        }
-        player.play()
-        // 兜底定时器: 即使 completionHandler 未触发也能清理
-        let dur = Double(buffer.frameLength) / 44100.0 + 0.3
-        graphQueue.asyncAfter(deadline: .now() + dur) { [weak self] in
-            self?.teardownPlayer(key: key)
-        }
-    }
-
-    /// 安全移除 player: 只在 player 仍 attached 时操作
-    private func teardownPlayer(key: ObjectIdentifier) {
-        guard let player = activePlayers.removeValue(forKey: key) else { return }
-        // 已被移除则跳过(engine.attachedNodes 是 NSSet 风格, 用 contains 判引用)
-        guard engine.attachedNodes.contains(where: { $0 === player }) else { return }
-        if started, engine.isRunning {
-            player.stop()
-            engine.detach(player)
         }
     }
 }
