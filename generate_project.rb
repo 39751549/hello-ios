@@ -22,6 +22,13 @@ if File.exist?(info_path)
   group.new_file('Info.plist')
 end
 
+# 添加 Assets.xcassets(图标资源, 参与编译生成 AppIcon)
+xcassets_path = 'HelloApp/Assets.xcassets'
+if File.exist?(xcassets_path)
+  asset_ref = group.new_file('Assets.xcassets')
+  target.add_file_references([asset_ref])
+end
+
 settings = {
   'PRODUCT_BUNDLE_IDENTIFIER'                    => 'com.youxi.huanYu',
   'MARKETING_VERSION'                            => '1.0.0',
