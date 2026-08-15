@@ -41,6 +41,22 @@ final class GameScene: SCNScene {
     // 玩家跟随点光源
     private let playerLightNode = SCNNode()
 
+    // 摄像机轨道(可旋转视角)
+    private var cameraYaw: Float = 0
+    private let cameraDistance: Float = 13
+    private let cameraHeight: Float = 7.8
+
+    // 角色骨骼关节(用于行走/idle/攻击动画)
+    private var torsoNode: SCNNode?
+    private var headNode: SCNNode?
+    private var leftArmJoint: SCNNode?
+    private var rightArmJoint: SCNNode?
+    private var leftLegJoint: SCNNode?
+    private var rightLegJoint: SCNNode?
+    private var capeNode: SCNNode?
+    private var isWalking = false
+    private var isBusy = false  // 战斗中不播行走
+
     override init() {
         super.init()
         background.contents = gradientImage()
@@ -372,9 +388,9 @@ final class GameScene: SCNScene {
         spawnNodeParticles(at: pos, color: UIColor(hex: 0xffd54f), count: 15, speed: 4, duration: 0.6, size: 0.08, gravityY: 1)
     }
 
-    // MARK: - 玩家
+    // MARK: - 玩家(关节骨骼模型)
     private func setupPlayer() {
-        // 铠甲材质(蓝金金属感)
+        // 材质
         let armorMat = SCNMaterial()
         armorMat.diffuse.contents = UIColor.primary
         armorMat.emission.contents = UIColor.primary.withAlphaComponent(0.12)
@@ -382,101 +398,131 @@ final class GameScene: SCNScene {
         armorMat.roughness.contents = 0.3
         armorMat.lightingModel = .physicallyBased
 
-        // 皮肤材质
         let skinMat = SCNMaterial()
         skinMat.diffuse.contents = UIColor(hex: 0xffe0b2)
         skinMat.roughness.contents = 0.55
         skinMat.lightingModel = .physicallyBased
 
-        // 深色皮革材质(腿/剑柄)
         let leatherMat = SCNMaterial()
         leatherMat.diffuse.contents = UIColor(hex: 0x37474f)
         leatherMat.roughness.contents = 0.8
         leatherMat.lightingModel = .physicallyBased
 
-        // 1) 躯干(铠甲) - 必须第一个添加,作为 attack 挥砍旋转体
-        let bodyGeo = SCNCapsule(capRadius: 0.3, height: 0.9)
-        bodyGeo.materials = [armorMat]
-        let body = SCNNode(geometry: bodyGeo)
-        body.position = SCNVector3(0, 0.62, 0)
-        body.castsShadow = true
-        playerNode.addChildNode(body)
-
-        // 2) 胸甲装饰(金色菱形)
-        let chestGeo = SCNBox(width: 0.22, height: 0.22, length: 0.06, chamferRadius: 0.02)
         let goldMat = SCNMaterial()
         goldMat.diffuse.contents = UIColor(hex: 0xffd54f)
         goldMat.metalness.contents = 0.9
         goldMat.roughness.contents = 0.2
         goldMat.lightingModel = .physicallyBased
+
+        let bladeMat = SCNMaterial()
+        bladeMat.diffuse.contents = UIColor(hex: 0xeceff1)
+        bladeMat.metalness.contents = 0.95
+        bladeMat.roughness.contents = 0.12
+        bladeMat.lightingModel = .physicallyBased
+
+        // 用一个"根骨骼"节点承载身体,便于整体呼吸/跳跃
+        let root = SCNNode()
+        root.position = SCNVector3(0, 0, 0)
+        playerNode.addChildNode(root)
+        torsoNode = root
+
+        // 1) 躯干
+        let bodyGeo = SCNCapsule(capRadius: 0.3, height: 0.9)
+        bodyGeo.materials = [armorMat]
+        let body = SCNNode(geometry: bodyGeo)
+        body.position = SCNVector3(0, 0.62, 0)
+        body.castsShadow = true
+        root.addChildNode(body)
+
+        // 胸甲金饰
+        let chestGeo = SCNBox(width: 0.22, height: 0.22, length: 0.06, chamferRadius: 0.02)
         chestGeo.materials = [goldMat]
         let chest = SCNNode(geometry: chestGeo)
         chest.position = SCNVector3(0, 0.68, 0.26)
-        playerNode.addChildNode(chest)
+        root.addChildNode(chest)
 
-        // 3) 肩甲(左右)
+        // 肩甲
         let shoulderGeo = SCNSphere(radius: 0.16)
         shoulderGeo.materials = [armorMat]
         let lShoulder = SCNNode(geometry: shoulderGeo)
         lShoulder.position = SCNVector3(-0.32, 0.92, 0)
         lShoulder.castsShadow = true
-        playerNode.addChildNode(lShoulder)
+        root.addChildNode(lShoulder)
         let rShoulder = SCNNode(geometry: shoulderGeo)
         rShoulder.position = SCNVector3(0.32, 0.92, 0)
         rShoulder.castsShadow = true
-        playerNode.addChildNode(rShoulder)
+        root.addChildNode(rShoulder)
 
-        // 4) 头部
+        // 2) 头部(独立节点,可点头)
+        let headRoot = SCNNode()
+        headRoot.position = SCNVector3(0, 1.05, 0)
+        root.addChildNode(headRoot)
+        headNode = headRoot
+
         let headGeo = SCNSphere(radius: 0.22)
         headGeo.materials = [skinMat]
         let head = SCNNode(geometry: headGeo)
-        head.position = SCNVector3(0, 1.12, 0)
+        head.position = SCNVector3(0, 0.18, 0)
         head.castsShadow = true
-        playerNode.addChildNode(head)
+        headRoot.addChildNode(head)
 
-        // 5) 头盔(顶部半球)
         let helmGeo = SCNSphere(radius: 0.25)
         helmGeo.materials = [armorMat]
         let helm = SCNNode(geometry: helmGeo)
-        helm.position = SCNVector3(0, 1.16, 0)
+        helm.position = SCNVector3(0, 0.22, 0)
         helm.scale = SCNVector3(1, 0.65, 1)
-        playerNode.addChildNode(helm)
-        // 头盔羽饰(金色尖)
+        headRoot.addChildNode(helm)
         let plumeGeo = SCNCone(topRadius: 0, bottomRadius: 0.05, height: 0.25)
         plumeGeo.materials = [goldMat]
         let plume = SCNNode(geometry: plumeGeo)
-        plume.position = SCNVector3(0, 1.42, 0)
-        playerNode.addChildNode(plume)
+        plume.position = SCNVector3(0, 0.48, 0)
+        headRoot.addChildNode(plume)
+        // 眼睛(发光)
+        let eyeMat = SCNMaterial()
+        eyeMat.diffuse.contents = UIColor.white
+        eyeMat.emission.contents = UIColor.cyan
+        eyeMat.lightingModel = .constant
+        let eyeGeo = SCNSphere(radius: 0.03)
+        eyeGeo.materials = [eyeMat]
+        let lEye = SCNNode(geometry: eyeGeo); lEye.position = SCNVector3(-0.07, 0.18, 0.2)
+        let rEye = SCNNode(geometry: eyeGeo); rEye.position = SCNVector3(0.07, 0.18, 0.2)
+        headRoot.addChildNode(lEye); headRoot.addChildNode(rEye)
 
-        // 6) 左臂
-        let armGeo = SCNCapsule(capRadius: 0.09, height: 0.6)
-        armGeo.materials = [armorMat]
-        let leftArm = SCNNode(geometry: armGeo)
-        leftArm.position = SCNVector3(-0.36, 0.62, 0)
-        leftArm.castsShadow = true
-        playerNode.addChildNode(leftArm)
+        // 3) 左臂(关节在肩膀)
+        leftArmJoint = makeLimb(jointAt: SCNVector3(-0.34, 0.92, 0), length: 0.6, radius: 0.09, mat: armorMat)
+        root.addChildNode(leftArmJoint!)
+        // 4) 右臂(持剑)
+        rightArmJoint = makeLimb(jointAt: SCNVector3(0.34, 0.92, 0), length: 0.6, radius: 0.09, mat: armorMat)
+        root.addChildNode(rightArmJoint!)
+        // 把剑挂到右手末端
+        let swordNode = SCNNode()
+        let bladeGeo = SCNBox(width: 0.05, height: 0.85, length: 0.015, chamferRadius: 0.008)
+        bladeGeo.materials = [bladeMat]
+        let blade = SCNNode(geometry: bladeGeo)
+        blade.position = SCNVector3(0, 0.42, 0)
+        swordNode.addChildNode(blade)
+        let guardGeo = SCNBox(width: 0.2, height: 0.035, length: 0.05, chamferRadius: 0.008)
+        guardGeo.materials = [goldMat]
+        let guardNode = SCNNode(geometry: guardGeo)
+        swordNode.addChildNode(guardNode)
+        let hiltGeo = SCNCylinder(radius: 0.028, height: 0.14)
+        hiltGeo.materials = [leatherMat]
+        let hilt = SCNNode(geometry: hiltGeo)
+        hilt.position = SCNVector3(0, -0.1, 0)
+        swordNode.addChildNode(hilt)
+        swordNode.position = SCNVector3(0, -0.32, 0.04)
+        swordNode.eulerAngles = SCNVector3(0, 0, Float.pi/9)
+        swordNode.castsShadow = true
+        rightArmJoint?.addChildNode(swordNode)
 
-        // 7) 右臂(持剑手)
-        let rightArm = SCNNode(geometry: armGeo)
-        rightArm.position = SCNVector3(0.36, 0.62, 0)
-        rightArm.castsShadow = true
-        playerNode.addChildNode(rightArm)
+        // 5) 左腿(关节在髋部)
+        leftLegJoint = makeLimb(jointAt: SCNVector3(-0.15, 0.36, 0), length: 0.55, radius: 0.11, mat: leatherMat)
+        root.addChildNode(leftLegJoint!)
+        // 6) 右腿
+        rightLegJoint = makeLimb(jointAt: SCNVector3(0.15, 0.36, 0), length: 0.55, radius: 0.11, mat: leatherMat)
+        root.addChildNode(rightLegJoint!)
 
-        // 8) 左腿
-        let legGeo = SCNCapsule(capRadius: 0.11, height: 0.55)
-        legGeo.materials = [leatherMat]
-        let leftLeg = SCNNode(geometry: legGeo)
-        leftLeg.position = SCNVector3(-0.15, 0.08, 0)
-        leftLeg.castsShadow = true
-        playerNode.addChildNode(leftLeg)
-
-        // 9) 右腿
-        let rightLeg = SCNNode(geometry: legGeo)
-        rightLeg.position = SCNVector3(0.15, 0.08, 0)
-        rightLeg.castsShadow = true
-        playerNode.addChildNode(rightLeg)
-
-        // 10) 披风
+        // 7) 披风
         let capeGeo = SCNBox(width: 0.48, height: 0.85, length: 0.03, chamferRadius: 0.02)
         let capeMat = SCNMaterial()
         capeMat.diffuse.contents = UIColor.danger.withAlphaComponent(0.92)
@@ -487,54 +533,28 @@ final class GameScene: SCNScene {
         let cape = SCNNode(geometry: capeGeo)
         cape.position = SCNVector3(0, 0.68, -0.22)
         cape.eulerAngles = SCNVector3(-0.12, 0, 0)
-        playerNode.addChildNode(cape)
-
-        // 11) 剑(刀身+护手+柄)
-        let swordNode = SCNNode()
-        let bladeGeo = SCNBox(width: 0.05, height: 0.85, length: 0.015, chamferRadius: 0.008)
-        let bladeMat = SCNMaterial()
-        bladeMat.diffuse.contents = UIColor(hex: 0xeceff1)
-        bladeMat.metalness.contents = 0.95
-        bladeMat.roughness.contents = 0.12
-        bladeMat.lightingModel = .physicallyBased
-        bladeGeo.materials = [bladeMat]
-        let blade = SCNNode(geometry: bladeGeo)
-        blade.position = SCNVector3(0, 0.42, 0)
-        swordNode.addChildNode(blade)
-        // 护手
-        let guardGeo = SCNBox(width: 0.2, height: 0.035, length: 0.05, chamferRadius: 0.008)
-        guardGeo.materials = [goldMat]
-        let guardNode = SCNNode(geometry: guardGeo)
-        guardNode.position = SCNVector3(0, 0.0, 0)
-        swordNode.addChildNode(guardNode)
-        // 剑柄
-        let hiltGeo = SCNCylinder(radius: 0.028, height: 0.14)
-        hiltGeo.materials = [leatherMat]
-        let hilt = SCNNode(geometry: hiltGeo)
-        hilt.position = SCNVector3(0, -0.1, 0)
-        swordNode.addChildNode(hilt)
-        swordNode.position = SCNVector3(0.40, 0.62, 0.12)
-        swordNode.eulerAngles = SCNVector3(0, 0, Float.pi/9)
-        swordNode.castsShadow = true
-        playerNode.addChildNode(swordNode)
+        root.addChildNode(cape)
+        capeNode = cape
 
         playerNode.position = SCNVector3(0, 0, 6)
         rootNode.addChildNode(playerNode)
 
         // 玩家头顶血条
-        setupHpBar(playerHpBar, fill: playerHpFill, width: playerHpWidth, color: .danger, parent: playerNode, yOffset: 1.65)
+        setupHpBar(playerHpBar, fill: playerHpFill, width: playerHpWidth, color: .danger, parent: playerNode, yOffset: 1.85)
 
-        // 摄像机
+        // 摄像机(轨道环绕 + 始终看向玩家)
         let cam = SCNCamera()
         cam.fieldOfView = 55
         cam.zNear = 0.1
         cam.zFar = 200
         cameraNode.camera = cam
-        cameraNode.position = SCNVector3(0, 7.5, 13)
-        cameraNode.eulerAngles = SCNVector3(-Float.pi/6.5, 0, 0)
         rootNode.addChildNode(cameraNode)
+        let look = SCNLookAtConstraint(target: playerNode)
+        look.isGimbalLockEnabled = true
+        cameraNode.constraints = [look]
+        updateCameraPosition()
 
-        // 玩家跟随点光源(温暖色调,营造氛围)
+        // 玩家跟随点光源
         let pLight = SCNLight()
         pLight.type = .omni
         pLight.color = UIColor(hex: 0xffe0b2, alpha: 0.9)
@@ -545,6 +565,99 @@ final class GameScene: SCNScene {
         playerLightNode.light = pLight
         playerLightNode.position = SCNVector3(0, 3, 0)
         playerNode.addChildNode(playerLightNode)
+
+        // 启动 idle 呼吸动画
+        startIdle()
+    }
+
+    /// 构造一个以 jointAt 为旋转中心的肢体(胶囊向下偏移)
+    private func makeLimb(jointAt: SCNVector3, length: CGFloat, radius: CGFloat, mat: SCNMaterial) -> SCNNode {
+        let joint = SCNNode()
+        joint.position = jointAt
+        let geo = SCNCapsule(capRadius: radius, height: length)
+        geo.materials = [mat]
+        let limb = SCNNode(geometry: geo)
+        limb.position = SCNVector3(0, -Float(length)/2, 0)
+        limb.castsShadow = true
+        joint.addChildNode(limb)
+        return joint
+    }
+
+    /// 更新摄像机轨道位置
+    func updateCameraPosition() {
+        let p = playerNode.position
+        cameraNode.position = SCNVector3(
+            p.x + sin(cameraYaw) * cameraDistance,
+            cameraHeight,
+            p.z + cos(cameraYaw) * cameraDistance
+        )
+        lightNode.position = SCNVector3(p.x + sin(cameraYaw + Float.pi/4) * 12, 30, p.z + cos(cameraYaw + Float.pi/4) * 12)
+    }
+
+    /// 手势旋转视角
+    func orbitCamera(deltaYaw: Float) {
+        cameraYaw += deltaYaw
+        updateCameraPosition()
+    }
+
+    // MARK: - 角色动画
+    private func startIdle() {
+        torsoNode?.removeAction(forKey: "walk")
+        guard let torso = torsoNode else { return }
+        let bob = SCNAction.repeatForever(SCNAction.sequence([
+            SCNAction.moveBy(x: 0, y: 0.04, z: 0, duration: 1.6),
+            SCNAction.moveBy(x: 0, y: -0.04, z: 0, duration: 1.6),
+        ]))
+        bob.timingMode = .easeInEaseOut
+        torso.runAction(bob, forKey: "idle")
+        // 手臂自然垂下
+        leftArmJoint?.runAction(SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.2))
+        rightArmJoint?.runAction(SCNAction.rotateTo(x: 0, y: 0, z: CGFloat.pi/8, duration: 0.2))
+    }
+
+    private func startWalk() {
+        torsoNode?.removeAction(forKey: "idle")
+        guard !isBusy else { return }
+        let swing: Float = 0.6
+        let dur: TimeInterval = 0.32
+        let lArm = SCNAction.repeatForever(SCNAction.sequence([
+            SCNAction.rotateTo(x: CGFloat(swing), y: 0, z: 0, duration: dur),
+            SCNAction.rotateTo(x: CGFloat(-swing), y: 0, z: 0, duration: dur),
+        ]))
+        let rArm = SCNAction.repeatForever(SCNAction.sequence([
+            SCNAction.rotateTo(x: CGFloat(-swing), y: 0, z: CGFloat.pi/8, duration: dur),
+            SCNAction.rotateTo(x: CGFloat(swing), y: 0, z: CGFloat.pi/8, duration: dur),
+        ]))
+        let lLeg = SCNAction.repeatForever(SCNAction.sequence([
+            SCNAction.rotateTo(x: CGFloat(-swing), y: 0, z: 0, duration: dur),
+            SCNAction.rotateTo(x: CGFloat(swing), y: 0, z: 0, duration: dur),
+        ]))
+        let rLeg = SCNAction.repeatForever(SCNAction.sequence([
+            SCNAction.rotateTo(x: CGFloat(swing), y: 0, z: 0, duration: dur),
+            SCNAction.rotateTo(x: CGFloat(-swing), y: 0, z: 0, duration: dur),
+        ]))
+        lArm.timingMode = .easeInEaseOut
+        rArm.timingMode = .easeInEaseOut
+        leftArmJoint?.runAction(lArm, forKey: "walk")
+        rightArmJoint?.runAction(rArm, forKey: "walk")
+        leftLegJoint?.runAction(lLeg, forKey: "walk")
+        rightLegJoint?.runAction(rLeg, forKey: "walk")
+    }
+
+    private func stopWalk() {
+        leftArmJoint?.removeAction(forKey: "walk")
+        rightArmJoint?.removeAction(forKey: "walk")
+        leftLegJoint?.removeAction(forKey: "walk")
+        rightLegJoint?.removeAction(forKey: "walk")
+        startIdle()
+    }
+
+    /// 挥砍动画(右手高举劈下,不含身体位移,避免与移动序列冲突)
+    func playJumpSlash() {
+        let raise = SCNAction.rotateTo(x: CGFloat(-2.2), y: 0, z: CGFloat.pi/8, duration: 0.18)
+        let chop = SCNAction.rotateTo(x: CGFloat(1.3), y: 0, z: CGFloat.pi/8, duration: 0.16)
+        chop.timingMode = .easeIn
+        rightArmJoint?.runAction(SCNAction.sequence([raise, chop, SCNAction.rotateTo(x: 0, y: 0, z: CGFloat.pi/8, duration: 0.12)]))
     }
 
     private func setupHpBar(_ bar: SCNNode, fill: SCNNode, width: CGFloat, color: UIColor, parent: SCNNode, yOffset: Float) {
@@ -675,31 +788,36 @@ final class GameScene: SCNScene {
     }
 
     func update(deltaTime: Float) {
-        // 玩家移动
+        // 玩家移动(相机相对: 推上=向屏幕里走,推下=向屏幕外走)
         let mag = sqrt(moveVector.x*moveVector.x + moveVector.y*moveVector.y)
-        if mag > 0.05 {
-            let dir = SIMD2<Float>(moveVector.x, moveVector.y)
-            let normalized = dir / max(mag, 0.001)
-            let dx = normalized.x * moveSpeed * deltaTime
-            let dz = normalized.y * moveSpeed * deltaTime
+        if mag > 0.05 && !isBusy {
+            let jx = moveVector.x / max(mag, 0.001)
+            let jy = moveVector.y / max(mag, 0.001)
+            // 相机到玩家方向 = "前方"(指向屏幕深处)
+            let camP = cameraNode.position
+            var fwd = SIMD2<Float>(playerNode.position.x - camP.x, playerNode.position.z - camP.z)
+            let flen = sqrt(fwd.x*fwd.x + fwd.y*fwd.y)
+            if flen > 0.001 { fwd = SIMD2<Float>(fwd.x/flen, fwd.y/flen) }
+            let right = SIMD2<Float>(-fwd.y, fwd.x)
+            let moveDir = SIMD2<Float>(fwd.x * jy + right.x * jx, fwd.y * jy + right.y * jx)
+            let speed = moveSpeed * min(mag, 1.0)
             var np = playerNode.simdPosition
-            np.x = clamp(np.x + dx, -mapHalf+1, mapHalf-1)
-            np.z = clamp(np.z + dz, -mapHalf+1, mapHalf-1)
+            np.x = clamp(np.x + moveDir.x * speed * deltaTime, -mapHalf+1, mapHalf-1)
+            np.z = clamp(np.z + moveDir.y * speed * deltaTime, -mapHalf+1, mapHalf-1)
             playerNode.simdPosition = np
 
-            // 朝向
-            let angle = atan2(dir.x, dir.y)
+            // 朝向移动方向(模型默认面向 +Z)
+            let angle = atan2(moveDir.x, moveDir.y)
             playerNode.eulerAngles.y = -angle
 
-            // 摄像机跟随
-            cameraNode.position.x = np.x
-            cameraNode.position.z = np.z + 14
-            lightNode.position.x = np.x + 10
-            lightNode.position.z = np.z + 10
-
+            updateCameraPosition()
             onPlayerMove?(playerNode.position)
+
+            if !isWalking { isWalking = true; startWalk() }
+        } else {
+            if isWalking { isWalking = false; stopWalk() }
         }
-        // 怪物面向玩家(只眼睛)
+        // 怪物面向玩家
         for m in monsters where m.alive {
             let dx = playerNode.position.x - m.node.position.x
             let dz = playerNode.position.z - m.node.position.z
@@ -732,10 +850,12 @@ final class GameScene: SCNScene {
     }
 
     // MARK: - 战斗动画
-    /// 播放攻击动画:玩家冲向怪物 -> 受击粒子+伤害数字 -> 怪物血条变化 -> 怪物倒下爆裂
+    /// 播放攻击动画:玩家冲向怪物 -> 跳劈+受击粒子+伤害数字 -> 怪物血条变化 -> 怪物倒下爆裂
     func playBattleAnimation(monsterIdx: Int, win: Bool, rounds: Int, monsterHpPct: CGFloat, playerAtk: Int, completion: @escaping () -> Void) {
         guard monsterIdx < monsters.count else { completion(); return }
         let m = monsters[monsterIdx]
+        isBusy = true
+        if isWalking { isWalking = false; stopWalk() }
         let origPos = playerNode.position
         let targetPos = SCNVector3(
             m.node.position.x - Float(m.node.scale.x) * 0.8,
@@ -747,19 +867,15 @@ final class GameScene: SCNScene {
         // 怪物头顶位置(粒子/飘字基准点)
         let monsterTop = SCNVector3(m.node.position.x, m.node.position.y + Float(m.node.scale.x) * 1.8, m.node.position.z)
 
+        // 面向怪物
+        let faceAngle = atan2(targetPos.x - origPos.x, targetPos.z - origPos.z)
+        playerNode.runAction(SCNAction.rotateTo(x: 0, y: CGFloat(-faceAngle), z: 0, duration: 0.12))
+
         // 1) 冲过去
-        let rush = SCNAction.move(to: targetPos, duration: TimeInterval(min(0.35, dist/8)))
+        let rush = SCNAction.move(to: targetPos, duration: TimeInterval(min(0.32, dist/8)))
         rush.timingMode = .easeInEaseOut
 
-        // 2) 攻击挥砍动作
-        let swing = SCNAction.sequence([
-            SCNAction.rotateTo(x: 0, y: 0, z: CGFloat.pi/4, duration: 0.12),
-            SCNAction.rotateTo(x: 0, y: 0, z: -CGFloat.pi/8, duration: 0.12),
-            SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.12),
-        ])
-        let bodyNode = playerNode.childNodes.first
-
-        // 3) 受击闪烁(保留原色)
+        // 3) 受击闪烁
         let origEmission = m.color.withAlphaComponent(0.18)
         let blink = SCNAction.sequence([
             SCNAction.run { node in
@@ -779,24 +895,26 @@ final class GameScene: SCNScene {
             },
         ])
 
-        // 到达怪物后:挥砍 + 闪烁 + 粒子 + 伤害数字
+        // 到达怪物后:跳劈 + 闪烁 + 粒子 + 伤害数字 + 音效
         let hitImpact = SCNAction.run { [weak self] _ in
             guard let self = self else { return }
-            bodyNode?.runAction(swing)
+            self.playJumpSlash()
+            SoundManager.shared.play(.attack)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                SoundManager.shared.play(.hit)
+            }
             m.node.childNodes.first?.runAction(blink)
-            // 受击火花
             self.spawnHitSparks(at: monsterTop, color: m.color)
-            // 第一段伤害数字
             let dmg1 = max(1, playerAtk + Int.random(in: -5...15))
             self.showDamageNumber("\(dmg1)", color: .white, at: monsterTop, scale: 1.0)
 
-            // 模拟多回合伤害(根据 rounds 数,最多显示 3 段)
             let segments = min(max(rounds, 1), 3)
             for i in 1..<segments {
                 let delay = TimeInterval(i) * 0.18
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                     guard self.monsters.indices.contains(monsterIdx), self.monsters[monsterIdx].alive || win else { return }
                     self.spawnHitSparks(at: monsterTop, color: m.color)
+                    SoundManager.shared.play(.hit)
                     let dmg = max(1, playerAtk + Int.random(in: -8...20))
                     let col: UIColor = i == segments - 1 && win ? .gold : .white
                     self.showDamageNumber("\(dmg)", color: col, at: monsterTop, scale: i == segments - 1 ? 1.3 : 1.0)
@@ -809,16 +927,21 @@ final class GameScene: SCNScene {
             self?.setMonsterHp(idx: monsterIdx, pct: win ? 0 : monsterHpPct)
         }
 
-        // 5) 回到原位
+        // 5) 起跳劈砍 + 回到原位
+        let hop = SCNAction.sequence([
+            SCNAction.moveBy(x: 0, y: 1.2, z: 0, duration: 0.18),
+            SCNAction.moveBy(x: 0, y: -1.2, z: 0, duration: 0.15),
+        ])
         let back = SCNAction.move(to: origPos, duration: 0.3)
         back.timingMode = .easeInEaseOut
 
-        playerNode.runAction(SCNAction.sequence([rush, hitImpact, SCNAction.wait(duration: 0.5), back])) { [weak self] in
+        playerNode.runAction(SCNAction.sequence([rush, SCNAction.group([hitImpact, hop]), SCNAction.wait(duration: 0.4), back])) { [weak self] in
             guard let self = self else { completion(); return }
+            self.isBusy = false
             if win {
-                // 死亡爆裂粒子
+                SoundManager.shared.play(.death)
                 self.spawnDeathBurst(at: monsterTop, color: m.color)
-                // 怪物倒下消散
+                self.spawnDeathBurst(at: monsterTop, color: .gold)
                 let fall = SCNAction.sequence([
                     SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.3),
                     SCNAction.fadeOut(duration: 0.35),
@@ -838,6 +961,56 @@ final class GameScene: SCNScene {
                 DispatchQueue.main.async { completion() }
             }
         }
+    }
+
+    // MARK: - AOE 群攻特效(命中范围内所有可见怪物)
+    func playAOESkill(centerPos: SCNVector3) {
+        SoundManager.shared.play(.aoe)
+        // 中心爆炸
+        spawnNodeParticles(at: centerPos, color: UIColor(hex: 0xff7043), count: 40, speed: 7, duration: 0.9, size: 0.16, gravityY: 1)
+        spawnNodeParticles(at: centerPos, color: UIColor(hex: 0xffd54f), count: 25, speed: 5, duration: 0.7, size: 0.1, gravityY: 2)
+        // 冲击波环(扁平放大圆环)
+        let ringGeo = SCNTorus(ringRadius: 0.3, pipeRadius: 0.06)
+        let ringMat = SCNMaterial()
+        ringMat.diffuse.contents = UIColor(hex: 0xff7043)
+        ringMat.emission.contents = UIColor(hex: 0xff7043)
+        ringMat.lightingModel = .constant
+        ringGeo.materials = [ringMat]
+        let ring = SCNNode(geometry: ringGeo)
+        ring.position = SCNVector3(centerPos.x, 0.3, centerPos.z)
+        ring.eulerAngles.x = Float.pi/2
+        rootNode.addChildNode(ring)
+        ring.runAction(SCNAction.sequence([
+            SCNAction.scale(to: 6, duration: 0.5),
+            SCNAction.fadeOut(duration: 0.2),
+            SCNAction.removeFromParentNode(),
+        ]))
+        // 对范围内每只活着的怪播受击火花+伤害数字
+        for m in monsters where m.alive {
+            let dx = m.node.position.x - centerPos.x
+            let dz = m.node.position.z - centerPos.z
+            if sqrt(dx*dx + dz*dz) < 4.5 {
+                let top = SCNVector3(m.node.position.x, m.node.position.y + 1.6, m.node.position.z)
+                spawnHitSparks(at: top, color: .gold)
+                showDamageNumber("\(Int.random(in: 80...220))", color: .gold, at: top, scale: 1.2)
+                m.node.childNodes.first?.runAction(SCNAction.sequence([
+                    SCNAction.moveBy(x: 0, y: 0.2, z: 0, duration: 0.1),
+                    SCNAction.moveBy(x: 0, y: -0.2, z: 0, duration: 0.1),
+                ]))
+            }
+        }
+    }
+
+    /// 把玩家瞬移到指定怪物旁(用于 BOSS 跳转)
+    func teleportToMonster(idx: Int) {
+        guard monsters.indices.contains(idx) else { return }
+        let m = monsters[idx]
+        let ang = Float.random(in: 0...(Float.pi*2))
+        let pos = SCNVector3(m.node.position.x + cos(ang)*2.2, 0, m.node.position.z + sin(ang)*2.2)
+        playerNode.position = pos
+        updateCameraPosition()
+        // 瞬移光效
+        spawnNodeParticles(at: SCNVector3(pos.x, 1, pos.z), color: .primary, count: 20, speed: 4, duration: 0.6, size: 0.1, gravityY: 2)
     }
 
     /// 显示伤害数字(比飘字更大更醒目)
@@ -883,6 +1056,15 @@ final class GameScene: SCNScene {
         m.node.opacity = 0
         m.node.runAction(SCNAction.fadeIn(duration: 0.5))
     }
+
+    /// 外部设置怪物存活状态(monsters 为 private(set))
+    func setMonsterAlive(idx: Int, alive: Bool) {
+        guard monsters.indices.contains(idx) else { return }
+        monsters[idx].alive = alive
+    }
+
+    /// 公开的重生接口
+    func respawnPublic(idx: Int) { respawn(monsterIdx: idx) }
 
     func setPlayerHp(pct: CGFloat) {
         let target = max(0, min(1, pct))
