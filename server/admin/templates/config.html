@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GM 后台 · 云更新配置</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(circle at 20% 10%, #15243b 0%, #0a0e1a 70%);
+    color:#e0e6ed; min-height:100vh;
+  }
+  .topbar {
+    height:60px; padding:0 24px; display:flex; align-items:center; justify-content:space-between;
+    background: rgba(20,26,38,0.85); backdrop-filter:blur(10px);
+    border-bottom:1px solid rgba(74,158,255,0.18); position:sticky; top:0; z-index:10;
+  }
+  .topbar .brand { font-size:18px; font-weight:600; background:linear-gradient(90deg,#4a9eff,#9c6bff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing:1px; }
+  .topbar .right { display:flex; align-items:center; gap:18px; font-size:13px; color:#8b9bb4; }
+  .topbar .right a { color:#8b9bb4; text-decoration:none; padding:6px 14px; border:1px solid rgba(74,158,255,0.2); border-radius:6px; transition:.2s; }
+  .topbar .right a:hover { color:#4a9eff; border-color:#4a9eff; }
+  .container { max-width:1100px; margin:0 auto; padding:24px; }
+  .panel {
+    background:rgba(20,26,38,0.7); border:1px solid rgba(74,158,255,0.15);
+    border-radius:12px; padding:20px; margin-bottom:20px;
+  }
+  .panel h2 { font-size:15px; color:#9fb0c8; margin-bottom:14px; letter-spacing:1px; display:flex; align-items:center; gap:8px; }
+  .panel h2::before { content:""; width:3px; height:14px; background:linear-gradient(180deg,#4a9eff,#9c6bff); border-radius:2px; }
+  .panel .tip { font-size:12px; color:#6b7a8f; margin-bottom:14px; line-height:1.6; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:10px 10px; text-align:left; font-size:13px; border-bottom:1px solid rgba(74,158,255,0.08); }
+  th { color:#6b7a8f; font-weight:600; letter-spacing:0.5px; }
+  tr:hover td { background:rgba(74,158,255,0.05); }
+  td input[type=text] {
+    width:100%; padding:6px 10px; font-size:13px; background:rgba(15,20,30,0.8);
+    border:1px solid rgba(74,158,255,0.2); border-radius:6px; color:#e0e6ed; outline:none;
+  }
+  td input[type=text]:focus { border-color:#4a9eff; }
+  td .key { font-family:Consolas,monospace; color:#4a9eff; }
+  td .desc { color:#8b9bb4; font-size:12px; }
+  .btn {
+    padding:6px 14px; font-size:12px; cursor:pointer; border:none; border-radius:6px;
+    background:linear-gradient(90deg,#4a9eff,#6b5bff); color:#fff; font-weight:600;
+  }
+  .btn.del { background:linear-gradient(90deg,#ef5350,#d32f2f); }
+  .btn-sm { padding:4px 10px; font-size:11px; }
+  .add-row td { background:rgba(74,158,255,0.05); }
+  .msg { padding:10px 16px; border-radius:8px; margin-bottom:14px; font-size:13px; display:none; }
+  .msg.ok { background:rgba(76,175,80,0.15); color:#66bb6a; border:1px solid rgba(76,175,80,0.3); display:block; }
+  .msg.err { background:rgba(239,83,80,0.15); color:#ef5350; border:1px solid rgba(239,83,80,0.3); display:block; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">GAME GM · 云更新配置</div>
+    <div class="right">
+      <span>管理员: <b style="color:#4a9eff">{{ gm }}</b></span>
+      <a href="/admin/dashboard">返回仪表盘</a>
+      <a href="/admin/logout">退出</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="panel">
+      <h2>云更新配置(客户端下次启动生效)</h2>
+      <div class="tip">
+        在此修改的配置,客户端 App 下次启动时通过 <code style="color:#4a9eff">/api/config</code> 拉取并覆盖本地默认值。<br>
+        可调:技能 CD、移动速度、刷新时间、奖励倍率、功能开关、登录公告、强制升级版本号等。<br>
+        <b style="color:#ffd54f">注意</b>:修改数值类配置时请填写合法数字,否则客户端会回退到默认值。
+      </div>
+      <div id="msg" class="msg"></div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:180px">Key</th>
+            <th style="width:320px">Value</th>
+            <th>说明</th>
+            <th style="width:160px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for c in configs %}
+          <tr data-key="{{ c.key }}">
+            <td><span class="key">{{ c.key }}</span></td>
+            <td><input type="text" class="v" value="{{ c.value }}"></td>
+            <td><span class="desc">{{ c.desc }}</span></td>
+            <td>
+              <button class="btn btn-sm save">保存</button>
+              <button class="btn btn-sm del del-btn">删除</button>
+            </td>
+          </tr>
+        {% endfor %}
+          <tr class="add-row">
+            <td><input type="text" id="new_key" placeholder="new_key" style="width:100%;padding:6px 10px;font-size:13px;background:rgba(15,20,30,0.8);border:1px solid rgba(74,158,255,0.2);border-radius:6px;color:#e0e6ed;outline:none;"></td>
+            <td><input type="text" id="new_value" placeholder="value" style="width:100%;padding:6px 10px;font-size:13px;background:rgba(15,20,30,0.8);border:1px solid rgba(74,158,255,0.2);border-radius:6px;color:#e0e6ed;outline:none;"></td>
+            <td><input type="text" id="new_desc" placeholder="说明(可选)" style="width:100%;padding:6px 10px;font-size:13px;background:rgba(15,20,30,0.8);border:1px solid rgba(74,158,255,0.2);border-radius:6px;color:#e0e6ed;outline:none;"></td>
+            <td><button class="btn btn-sm" id="add_btn">新增</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+function showMsg(text, isErr) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = 'msg ' + (isErr ? 'err' : 'ok');
+  setTimeout(()=>{ el.className='msg'; }, 2500);
+}
+document.querySelectorAll('tr[data-key]').forEach(tr => {
+  const key = tr.dataset.key;
+  tr.querySelector('.save').onclick = async () => {
+    const value = tr.querySelector('.v').value;
+    const res = await fetch('/admin/api/set_config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({key, value})
+    });
+    const j = await res.json();
+    if (res.ok && j.code === 0) showMsg(j.msg || '已保存', false);
+    else showMsg(j.detail || j.msg || '保存失败', true);
+  };
+  tr.querySelector('.del-btn').onclick = async () => {
+    if (!confirm('确认删除配置 ' + key + '?')) return;
+    const res = await fetch('/admin/api/del_config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({key, value:''})
+    });
+    const j = await res.json();
+    if (res.ok && j.code === 0) { showMsg(j.msg || '已删除', false); tr.remove(); }
+    else showMsg(j.detail || j.msg || '删除失败', true);
+  };
+});
+document.getElementById('add_btn').onclick = async () => {
+  const key = document.getElementById('new_key').value.trim();
+  const value = document.getElementById('new_value').value;
+  const desc = document.getElementById('new_desc').value;
+  if (!key) { showMsg('key 不能为空', true); return; }
+  const res = await fetch('/admin/api/add_config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({key, value, desc})
+  });
+  const j = await res.json();
+  if (res.ok && j.code === 0) { showMsg(j.msg || '已新增', false); setTimeout(()=>location.reload(), 800); }
+  else showMsg(j.detail || j.msg || '新增失败', true);
+};
+</script>
+</body>
+</html>
