@@ -17,6 +17,9 @@ final class RemoteConfig {
         "skill_flame_cd": "8",
         "skill_aoe_cd": "10",
         "skill_heal_cd": "15",
+        "skill_ice_cd": "10",
+        "skill_thunder_cd": "15",
+        "skill_meteor_cd": "20",
         "player_move_speed": "4.0",
         "monster_respawn": "5",
         "auto_battle_interval": "1.4",
@@ -79,6 +82,9 @@ final class RemoteConfig {
     var flameCD: TimeInterval { double("skill_flame_cd") }
     var aoeCD: TimeInterval { double("skill_aoe_cd") }
     var healCD: TimeInterval { double("skill_heal_cd") }
+    var iceCD: TimeInterval { double("skill_ice_cd") }
+    var thunderCD: TimeInterval { double("skill_thunder_cd") }
+    var meteorCD: TimeInterval { double("skill_meteor_cd") }
     var moveSpeed: Float { Float(double("player_move_speed")) }
     var monsterRespawnDelay: TimeInterval { double("monster_respawn") }
     var autoBattleInterval: TimeInterval { double("auto_battle_interval") }
