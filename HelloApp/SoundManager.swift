@@ -6,20 +6,42 @@ import AVFoundation
 /// 1) AVAudioEngine 非线程安全 → 所有引擎图操作在主线程串行执行
 /// 2) 引擎启动延迟到首次播放,且全部 do-catch,绝不抛出(避免任何设备上闪退)
 /// 3) 引擎不可用时 play() 静默返回
+/// 4) 主线程串行队列 + player 生命周期标记,杜绝重入/detach 已分离节点导致的崩溃
 final class SoundManager {
     static let shared = SoundManager()
     private let engine = AVAudioEngine()
     private var enabled = true
     private var started = false
     private var startAttempted = false
+    /// 主线程串行队列: 所有引擎图操作排队执行,避免并发 attach/detach
+    private let graphQueue = DispatchQueue.main
+    /// 当前活跃的 player 节点(用于安全 detach)
+    private var activePlayers: [ObjectIdentifier: AVAudioPlayerNode] = [:]
 
     private init() {
         // 不在 init 里碰 AVAudioSession/引擎启动, 避免任何启动期异常
+        // 监听音频中断,做最起码的恢复
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self = self else { return }
+            guard let info = note.userInfo,
+                  let typeRaw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
+            if type == .began {
+                self.engine.pause()
+            } else if type == .ended {
+                if self.started, !self.engine.isRunning {
+                    try? self.engine.start()
+                }
+            }
+        }
     }
 
     func setEnabled(_ on: Bool) {
         enabled = on
-        if !on { engine.pause() }
+        if !on { graphQueue.async { [weak self] in self?.engine.pause() } }
     }
 
     // MARK: - 音效类型
@@ -33,8 +55,8 @@ final class SoundManager {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             let buffer = self.synthesize(sfx)
-            // 引擎操作切主线程
-            DispatchQueue.main.async { [weak self] in
+            // 引擎操作切主线程串行队列
+            self.graphQueue.async { [weak self] in
                 self?.playBuffer(buffer)
             }
         }
@@ -164,20 +186,39 @@ final class SoundManager {
         return buffer
     }
 
-    // MARK: - 播放(主线程)
+    // MARK: - 播放(主线程串行)
     private func playBuffer(_ buffer: AVAudioPCMBuffer?) {
         guard enabled else { return }
         ensureStarted()
         guard let buffer = buffer, started, engine.isRunning else { return }
         let player = AVAudioPlayerNode()
+        let key = ObjectIdentifier(player)
+        // attach/connect/play 全部在同一主线程串行队列里完成
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: buffer.format)
-        player.scheduleBuffer(buffer, completionHandler: nil)
+        activePlayers[key] = player
+        player.scheduleBuffer(buffer) { [weak self] in
+            // 播放完成回调(可能在引擎内部线程) → 切回主线程清理
+            self?.graphQueue.async { [weak self] in
+                self?.teardownPlayer(key: key)
+            }
+        }
         player.play()
-        let dur = Double(buffer.frameLength) / 44100.0 + 0.15
-        DispatchQueue.main.asyncAfter(deadline: .now() + dur) { [weak self] in
+        // 兜底定时器: 即使 completionHandler 未触发也能清理
+        let dur = Double(buffer.frameLength) / 44100.0 + 0.3
+        graphQueue.asyncAfter(deadline: .now() + dur) { [weak self] in
+            self?.teardownPlayer(key: key)
+        }
+    }
+
+    /// 安全移除 player: 只在 player 仍 attached 时操作
+    private func teardownPlayer(key: ObjectIdentifier) {
+        guard let player = activePlayers.removeValue(forKey: key) else { return }
+        // 已被移除则跳过(engine.attachedNodes 是 NSSet 风格, 用 contains 判引用)
+        guard engine.attachedNodes.contains(where: { $0 === player }) else { return }
+        if started, engine.isRunning {
             player.stop()
-            self?.engine.detach(player)
+            engine.detach(player)
         }
     }
 }
