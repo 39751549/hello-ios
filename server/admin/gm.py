@@ -194,3 +194,53 @@ def api_logs(request: Request, db: Session = Depends(get_db)):
         "target": l.target, "detail": l.detail,
         "time": l.created_at.strftime("%Y-%m-%d %H:%M:%S") if l.created_at else "",
     } for l in logs])
+
+
+# ============ 云更新配置管理 ============
+@router.get("/config")
+def config_page(request: Request, db: Session = Depends(get_db)):
+    gm = require_gm(request, db)
+    configs = db.query(models.GameConfig).order_by(models.GameConfig.key).all()
+    return TEMPLATES.TemplateResponse("config.html", {
+        "request": request, "gm": gm.username, "configs": configs,
+    })
+
+
+@router.post("/api/set_config")
+def api_set_config(req: schemas.GmSetConfigIn, request: Request, db: Session = Depends(get_db)):
+    gm = require_gm(request, db)
+    c = db.query(models.GameConfig).filter_by(key=req.key).first()
+    if not c:
+        raise HTTPException(404, "配置项不存在")
+    old = c.value
+    c.value = req.value
+    log_gm(db, gm.username, "set_config", f"key:{req.key}", f"{old}->{req.value}")
+    db.commit()
+    return schemas.ApiResult(msg=f"已更新 {req.key} (客户端下次启动生效)")
+
+
+@router.post("/api/add_config")
+def api_add_config(req: schemas.GmAddConfigIn, request: Request, db: Session = Depends(get_db)):
+    gm = require_gm(request, db)
+    key = req.key.strip()
+    if not key:
+        raise HTTPException(400, "key 不能为空")
+    if db.query(models.GameConfig).filter_by(key=key).first():
+        raise HTTPException(400, "key 已存在")
+    db.add(models.GameConfig(key=key, value=req.value, desc=req.desc))
+    log_gm(db, gm.username, "add_config", f"key:{key}", req.value)
+    db.commit()
+    return schemas.ApiResult(msg=f"已新增配置 {key}")
+
+
+@router.post("/api/del_config")
+def api_del_config(req: schemas.GmSetConfigIn, request: Request, db: Session = Depends(get_db)):
+    """删除自定义配置项(预置项也允许删除,下次 init 会自动补回默认值)"""
+    gm = require_gm(request, db)
+    c = db.query(models.GameConfig).filter_by(key=req.key).first()
+    if not c:
+        raise HTTPException(404, "配置项不存在")
+    db.delete(c)
+    log_gm(db, gm.username, "del_config", f"key:{req.key}", "")
+    db.commit()
+    return schemas.ApiResult(msg=f"已删除 {req.key}")
