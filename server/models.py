@@ -164,3 +164,15 @@ class GmLog(Base):
     target = Column(String(128), default="")
     detail = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ============ 游戏配置(云更新 KV 表) ============
+# 客户端启动时拉取 /api/config,根据 key 覆盖本地默认值
+# 这样技能 CD/移动速度/刷新时间/UI 文案/开关等均可云端调整,无需重打包
+class GameConfig(Base):
+    __tablename__ = "game_config"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(64), unique=True, nullable=False, index=True)
+    value = Column(String(255), nullable=False, default="")
+    desc = Column(String(255), default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
