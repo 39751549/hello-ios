@@ -21,4 +21,10 @@ enum Config {
 
     static let tokenKey = "auth_token"
     static let usernameKey = "auth_username"
+
+    /// 客户端版本号(整数,每次发版+1)
+    /// 与服务端 force_update_version 比较:当 force_update_version > versionCode 时弹更新提示
+    static let versionCode: Int = 3
+    /// 版本显示字符串
+    static let versionString = "1.0.3"
 }
