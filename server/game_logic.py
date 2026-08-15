@@ -73,41 +73,77 @@ def add_exp(player: models.Player, exp_gain: int) -> list:
 
 
 def calc_battle(p_atk, p_df, p_hp, e_atk, e_df, e_hp, p_first=True):
-    """回合制战斗结算,返回 (win, rounds, p_hp_left, log)"""
+    """回合制战斗结算,返回 (win, rounds, p_hp_left, log)
+    增强:暴击率25%、连击加成、更大伤害波动、闪避、暴击致命"""
     p_hp_cur = p_hp
     e_hp_cur = e_hp
     log = []
-    for r in range(1, 60):
+    combo = 0  # 连击数
+    max_combo = 0
+    total_crit = 0
+    for r in range(1, 80):
         if p_first:
-            dmg = max(int(p_atk * random.uniform(0.9, 1.15)) - e_df, 1)
-            crit = random.random() < 0.15
-            if crit:
-                dmg = int(dmg * 2)
-            e_hp_cur -= dmg
-            log.append(f"回合{r}: 你造成 {dmg}{'(暴击!)' if crit else ''} 伤害,敌剩余 {max(e_hp_cur,0)}")
-            if e_hp_cur <= 0:
-                return True, r, p_hp_cur, log
-            edmg = max(int(e_atk * random.uniform(0.9, 1.1)) - p_df, 1)
-            p_hp_cur -= edmg
-            log.append(f"回合{r}: 敌造成 {edmg} 伤害,你剩余 {max(p_hp_cur,0)}")
-            if p_hp_cur <= 0:
-                return False, r, 0, log
+            # 玩家攻击
+            base = max(int(p_atk * random.uniform(0.85, 1.25)) - e_df, 1)
+            crit = random.random() < 0.25  # 暴击率25%
+            dodge = random.random() < 0.05  # 5%闪避
+            if dodge:
+                log.append(f"回合{r}: 敌人闪避了你的攻击!")
+            else:
+                if crit:
+                    base = int(base * 2.2)
+                    total_crit += 1
+                    combo += 1
+                else:
+                    combo = 0
+                # 连击加成:连续暴击伤害递增
+                if combo >= 2:
+                    base = int(base * (1 + 0.15 * combo))
+                max_combo = max(max_combo, combo)
+                e_hp_cur -= base
+                tag = ""
+                if crit:
+                    tag = f"(暴击! 连击x{combo})" if combo >= 2 else "(暴击!)"
+                log.append(f"回合{r}: 你造成 {base}{tag} 伤害,敌剩余 {max(e_hp_cur,0)}")
+                if e_hp_cur <= 0:
+                    log.append(f"战斗结束! 最高连击 {max_combo}, 暴击 {total_crit} 次")
+                    return True, r, p_hp_cur, log
+            # 敌人攻击
+            edmg = max(int(e_atk * random.uniform(0.85, 1.1)) - p_df, 1)
+            p_dodge = random.random() < 0.08  # 玩家8%闪避
+            if p_dodge:
+                log.append(f"回合{r}: 你闪避了敌人攻击!")
+            else:
+                p_hp_cur -= edmg
+                log.append(f"回合{r}: 敌造成 {edmg} 伤害,你剩余 {max(p_hp_cur,0)}")
+                if p_hp_cur <= 0:
+                    return False, r, 0, log
         else:
-            edmg = max(int(e_atk * random.uniform(0.9, 1.1)) - p_df, 1)
+            edmg = max(int(e_atk * random.uniform(0.85, 1.1)) - p_df, 1)
             p_hp_cur -= edmg
             log.append(f"回合{r}: 敌造成 {edmg} 伤害,你剩余 {max(p_hp_cur,0)}")
             if p_hp_cur <= 0:
                 return False, r, 0, log
-            dmg = max(int(p_atk * random.uniform(0.9, 1.15)) - e_df, 1)
-            crit = random.random() < 0.15
+            base = max(int(p_atk * random.uniform(0.85, 1.25)) - e_df, 1)
+            crit = random.random() < 0.25
             if crit:
-                dmg = int(dmg * 2)
-            e_hp_cur -= dmg
-            log.append(f"回合{r}: 你造成 {dmg}{'(暴击!)' if crit else ''} 伤害,敌剩余 {max(e_hp_cur,0)}")
+                base = int(base * 2.2)
+                total_crit += 1
+                combo += 1
+            else:
+                combo = 0
+            if combo >= 2:
+                base = int(base * (1 + 0.15 * combo))
+            max_combo = max(max_combo, combo)
+            e_hp_cur -= base
+            tag = ""
+            if crit:
+                tag = f"(暴击! 连击x{combo})" if combo >= 2 else "(暴击!)"
+            log.append(f"回合{r}: 你造成 {base}{tag} 伤害,敌剩余 {max(e_hp_cur,0)}")
             if e_hp_cur <= 0:
+                log.append(f"战斗结束! 最高连击 {max_combo}, 暴击 {total_crit} 次")
                 return True, r, p_hp_cur, log
-    # 超过60回合判定平局(玩家败)
-    return False, 60, p_hp_cur, log
+    return False, 80, p_hp_cur, log
 
 
 def roll_drops(item_rewards: list) -> list:
