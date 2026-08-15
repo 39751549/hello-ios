@@ -152,3 +152,14 @@ class GmSetCurrencyIn(BaseModel):
     player_id: int
     gold: Optional[int] = None
     diamond: Optional[int] = None
+
+
+class GmSetConfigIn(BaseModel):
+    key: str
+    value: str
+
+
+class GmAddConfigIn(BaseModel):
+    key: str
+    value: str
+    desc: str = ""
