@@ -25,16 +25,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         window.rootViewController = root
         window.makeKeyAndVisible()
         self.window = window
-        // 启动后若有上次崩溃, 弹窗显示
+        // 启动后若有上次崩溃, 弹窗显示(崩溃优先,无崩溃才弹公告,避免冲突)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let vc = self?.window?.rootViewController else { return }
-            CrashReporter.reportIfAny(in: vc)
-            // 公告(云更新:GM 可在后台修改)
-            let notice = RemoteConfig.shared.noticeText
-            if !notice.isEmpty {
-                let alert = UIAlertController(title: "公告", message: notice, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "知道了", style: .default))
-                vc.present(alert, animated: true)
+            if CrashReporter.lastCrash() != nil {
+                // 有崩溃日志:只弹崩溃弹窗(用户点"清除并继续"后关闭)
+                CrashReporter.reportIfAny(in: vc)
+            } else {
+                // 无崩溃:弹公告(云更新:GM 可在后台修改)
+                let notice = RemoteConfig.shared.noticeText
+                if !notice.isEmpty {
+                    let alert = UIAlertController(title: "公告", message: notice, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "知道了", style: .default))
+                    vc.present(alert, animated: true)
+                }
             }
         }
         return true
