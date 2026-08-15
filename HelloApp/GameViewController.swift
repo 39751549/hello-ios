@@ -11,19 +11,20 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
     private let attackBtn = UIButton(type: .system)
     private let flameBtn = UIButton(type: .system)
     private let healBtn = UIButton(type: .system)
+    private let aoeBtn = UIButton(type: .system)
     private let autoBtn = UIButton(type: .system)
     private let minimap = MinimapView()
     private let menuStack = UIStackView()
     private let logoutBtn = UIButton(type: .system)
-    private let battleHintLabel = UILabel.make("", font: .systemFont(ofSize: 14, weight: .bold), color: .white, alignment: .center)
+    private let bubbleStack = UIStackView()
     private var displayLink: CADisplayLink?
     private var lastTime: CFTimeInterval = 0
     private var inBattle = false
+    private var aoeInProgress = false
     private var playerInfo: PlayerInfo?
     private var autoBattle = false
     private var autoTimer: Timer?
-    private var flameCooldown = false
-    private var healCooldown = false
+    private var cooldowns: [String: TimeInterval] = [:]   // key -> 可用时间戳
     private var cooldownTimers: [String: Timer] = [:]
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
@@ -36,6 +37,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         setupHUD()
         setupControls()
         setupMenu()
+        setupBubbles()
         loadMe()
     }
 
@@ -62,14 +64,18 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         scnView.backgroundColor = UIColor(hex: 0x0a0f1c)
         scnView.isMultipleTouchEnabled = true
         scnView.rendersContinuously = true
-        // 高质量渲染
-        if #available(iOS 13.0, *) {
-            scnView.contentMode = .scaleAspectFill
-        }
         view.addSubview(scnView)
 
+        // 点击怪物
         let tap = UITapGestureRecognizer(target: self, action: #selector(sceneTapped(_:)))
         scnView.addGestureRecognizer(tap)
+
+        // 滑动旋转视角(单指拖动)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(scenePanned(_:)))
+        pan.minimumNumberOfTouches = 1
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = self
+        scnView.addGestureRecognizer(pan)
 
         NSLayoutConstraint.activate([
             scnView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -79,46 +85,30 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         ])
     }
 
-    // MARK: - HUD
+    // MARK: - HUD(缩小)
     private func setupHUD() {
         hudView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(hudView)
-        hudView.onHeal = { [weak self] in self?.doHeal() }
 
         NSLayoutConstraint.activate([
-            hudView.topAnchor.constraint(equalTo: view.topAnchor, constant: 56),
-            hudView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            hudView.widthAnchor.constraint(equalToConstant: 330),
-            hudView.heightAnchor.constraint(equalToConstant: 52),
-        ])
-
-        battleHintLabel.translatesAutoresizingMaskIntoConstraints = false
-        battleHintLabel.backgroundColor = UIColor.bgDark.withAlphaComponent(0.8)
-        battleHintLabel.layer.cornerRadius = 8
-        battleHintLabel.layer.masksToBounds = true
-        battleHintLabel.isHidden = true
-        battleHintLabel.alpha = 0
-        battleHintLabel.textAlignment = .center
-        view.addSubview(battleHintLabel)
-        NSLayoutConstraint.activate([
-            battleHintLabel.topAnchor.constraint(equalTo: hudView.bottomAnchor, constant: 8),
-            battleHintLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            battleHintLabel.heightAnchor.constraint(equalToConstant: 28),
-            battleHintLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            hudView.topAnchor.constraint(equalTo: view.topAnchor, constant: 50),
+            hudView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            hudView.widthAnchor.constraint(equalToConstant: 268),
+            hudView.heightAnchor.constraint(equalToConstant: 44),
         ])
 
         // 小地图(右上角,避开灵动岛区域,下移)
         minimap.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(minimap)
         NSLayoutConstraint.activate([
-            minimap.topAnchor.constraint(equalTo: view.topAnchor, constant: 56),
-            minimap.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            minimap.widthAnchor.constraint(equalToConstant: 92),
-            minimap.heightAnchor.constraint(equalToConstant: 92),
+            minimap.topAnchor.constraint(equalTo: view.topAnchor, constant: 50),
+            minimap.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            minimap.widthAnchor.constraint(equalToConstant: 84),
+            minimap.heightAnchor.constraint(equalToConstant: 84),
         ])
     }
 
-    // MARK: - 摇杆/攻击按钮/技能按钮
+    // MARK: - 摇杆/攻击/技能/AUTO
     private func setupControls() {
         joystick.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(joystick)
@@ -126,52 +116,13 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             self?.scene.setMoveVector(SIMD2<Float>(Float(x), Float(y)))
         }
         NSLayoutConstraint.activate([
-            joystick.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            joystick.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
-            joystick.widthAnchor.constraint(equalToConstant: 130),
-            joystick.heightAnchor.constraint(equalToConstant: 130),
+            joystick.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 22),
+            joystick.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -22),
+            joystick.widthAnchor.constraint(equalToConstant: 120),
+            joystick.heightAnchor.constraint(equalToConstant: 120),
         ])
 
-        // 普攻按钮
-        attackBtn.translatesAutoresizingMaskIntoConstraints = false
-        attackBtn.setTitle("⚔", for: .normal)
-        attackBtn.titleLabel?.font = .systemFont(ofSize: 32, weight: .bold)
-        attackBtn.setTitleColor(.white, for: .normal)
-        attackBtn.backgroundColor = UIColor.danger.withAlphaComponent(0.85)
-        attackBtn.layer.cornerRadius = 38
-        attackBtn.layer.borderColor = UIColor.danger.cgColor
-        attackBtn.layer.borderWidth = 2
-        attackBtn.makeGlow(.danger, radius: 12, opacity: 0.6)
-        attackBtn.addTarget(self, action: #selector(attackNearest), for: .touchUpInside)
-        view.addSubview(attackBtn)
-
-        // 烈焰斩技能
-        flameBtn.translatesAutoresizingMaskIntoConstraints = false
-        flameBtn.setTitle("🔥", for: .normal)
-        flameBtn.titleLabel?.font = .systemFont(ofSize: 26, weight: .bold)
-        flameBtn.setTitleColor(.white, for: .normal)
-        flameBtn.backgroundColor = UIColor.epic.withAlphaComponent(0.85)
-        flameBtn.layer.cornerRadius = 32
-        flameBtn.layer.borderColor = UIColor.epic.cgColor
-        flameBtn.layer.borderWidth = 2
-        flameBtn.makeGlow(.epic, radius: 10, opacity: 0.5)
-        flameBtn.addTarget(self, action: #selector(flameSkill), for: .touchUpInside)
-        view.addSubview(flameBtn)
-
-        // 治疗术技能
-        healBtn.translatesAutoresizingMaskIntoConstraints = false
-        healBtn.setTitle("✨", for: .normal)
-        healBtn.titleLabel?.font = .systemFont(ofSize: 26, weight: .bold)
-        healBtn.setTitleColor(.white, for: .normal)
-        healBtn.backgroundColor = UIColor(hex: 0x66bb6a).withAlphaComponent(0.85)
-        healBtn.layer.cornerRadius = 32
-        healBtn.layer.borderColor = UIColor(hex: 0x66bb6a).cgColor
-        healBtn.layer.borderWidth = 2
-        healBtn.makeGlow(UIColor(hex: 0x66bb6a), radius: 10, opacity: 0.5)
-        healBtn.addTarget(self, action: #selector(healSkill), for: .touchUpInside)
-        view.addSubview(healBtn)
-
-        // 自动战斗开关
+        // AUTO 自动挂机按钮(放左边,摇杆右上方)
         autoBtn.translatesAutoresizingMaskIntoConstraints = false
         autoBtn.setTitle("AUTO", for: .normal)
         autoBtn.titleLabel?.font = .systemFont(ofSize: 11, weight: .bold)
@@ -183,49 +134,103 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         autoBtn.addTarget(self, action: #selector(toggleAutoBattle), for: .touchUpInside)
         view.addSubview(autoBtn)
 
+        // 普攻按钮(右下,大圆)
+        attackBtn.translatesAutoresizingMaskIntoConstraints = false
+        attackBtn.setTitle("⚔", for: .normal)
+        attackBtn.titleLabel?.font = .systemFont(ofSize: 30, weight: .bold)
+        attackBtn.setTitleColor(.white, for: .normal)
+        attackBtn.backgroundColor = UIColor.danger.withAlphaComponent(0.85)
+        attackBtn.layer.cornerRadius = 36
+        attackBtn.layer.borderColor = UIColor.danger.cgColor
+        attackBtn.layer.borderWidth = 2
+        attackBtn.makeGlow(.danger, radius: 12, opacity: 0.6)
+        attackBtn.addTarget(self, action: #selector(attackNearest), for: .touchUpInside)
+        view.addSubview(attackBtn)
+
+        // 烈焰斩(单体爆发, CD 8s)
+        flameBtn.translatesAutoresizingMaskIntoConstraints = false
+        flameBtn.setTitle("🔥", for: .normal)
+        flameBtn.titleLabel?.font = .systemFont(ofSize: 24, weight: .bold)
+        flameBtn.backgroundColor = UIColor.epic.withAlphaComponent(0.85)
+        flameBtn.layer.cornerRadius = 30
+        flameBtn.layer.borderColor = UIColor.epic.cgColor
+        flameBtn.layer.borderWidth = 2
+        flameBtn.makeGlow(.epic, radius: 10, opacity: 0.5)
+        flameBtn.addTarget(self, action: #selector(flameSkill), for: .touchUpInside)
+        view.addSubview(flameBtn)
+
+        // 旋风斩(AOE 群攻, CD 10s)
+        aoeBtn.translatesAutoresizingMaskIntoConstraints = false
+        aoeBtn.setTitle("🌀", for: .normal)
+        aoeBtn.titleLabel?.font = .systemFont(ofSize: 24, weight: .bold)
+        aoeBtn.backgroundColor = UIColor.legend.withAlphaComponent(0.85)
+        aoeBtn.layer.cornerRadius = 30
+        aoeBtn.layer.borderColor = UIColor.legend.cgColor
+        aoeBtn.layer.borderWidth = 2
+        aoeBtn.makeGlow(.legend, radius: 10, opacity: 0.5)
+        aoeBtn.addTarget(self, action: #selector(aoeSkill), for: .touchUpInside)
+        view.addSubview(aoeBtn)
+
+        // 治疗术(CD 15s)
+        healBtn.translatesAutoresizingMaskIntoConstraints = false
+        healBtn.setTitle("✨", for: .normal)
+        healBtn.titleLabel?.font = .systemFont(ofSize: 24, weight: .bold)
+        healBtn.backgroundColor = UIColor(hex: 0x66bb6a).withAlphaComponent(0.85)
+        healBtn.layer.cornerRadius = 30
+        healBtn.layer.borderColor = UIColor(hex: 0x66bb6a).cgColor
+        healBtn.layer.borderWidth = 2
+        healBtn.makeGlow(UIColor(hex: 0x66bb6a), radius: 10, opacity: 0.5)
+        healBtn.addTarget(self, action: #selector(healSkill), for: .touchUpInside)
+        view.addSubview(healBtn)
+
         NSLayoutConstraint.activate([
-            attackBtn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28),
-            attackBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -28),
-            attackBtn.widthAnchor.constraint(equalToConstant: 76),
-            attackBtn.heightAnchor.constraint(equalToConstant: 76),
-            flameBtn.trailingAnchor.constraint(equalTo: attackBtn.leadingAnchor, constant: -14),
-            flameBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -40),
-            flameBtn.widthAnchor.constraint(equalToConstant: 64),
-            flameBtn.heightAnchor.constraint(equalToConstant: 64),
-            healBtn.trailingAnchor.constraint(equalTo: flameBtn.leadingAnchor, constant: -14),
-            healBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -40),
-            healBtn.widthAnchor.constraint(equalToConstant: 64),
-            healBtn.heightAnchor.constraint(equalToConstant: 64),
-            autoBtn.trailingAnchor.constraint(equalTo: healBtn.leadingAnchor, constant: -14),
-            autoBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -48),
-            autoBtn.widthAnchor.constraint(equalToConstant: 60),
+            autoBtn.leadingAnchor.constraint(equalTo: joystick.trailingAnchor, constant: 10),
+            autoBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -44),
+            autoBtn.widthAnchor.constraint(equalToConstant: 64),
             autoBtn.heightAnchor.constraint(equalToConstant: 32),
+
+            attackBtn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            attackBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
+            attackBtn.widthAnchor.constraint(equalToConstant: 72),
+            attackBtn.heightAnchor.constraint(equalToConstant: 72),
+            // 技能横排在攻击按钮左侧
+            flameBtn.trailingAnchor.constraint(equalTo: attackBtn.leadingAnchor, constant: -12),
+            flameBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -32),
+            flameBtn.widthAnchor.constraint(equalToConstant: 60),
+            flameBtn.heightAnchor.constraint(equalToConstant: 60),
+            aoeBtn.trailingAnchor.constraint(equalTo: flameBtn.leadingAnchor, constant: -12),
+            aoeBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -32),
+            aoeBtn.widthAnchor.constraint(equalToConstant: 60),
+            aoeBtn.heightAnchor.constraint(equalToConstant: 60),
+            healBtn.trailingAnchor.constraint(equalTo: aoeBtn.leadingAnchor, constant: -12),
+            healBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -32),
+            healBtn.widthAnchor.constraint(equalToConstant: 60),
+            healBtn.heightAnchor.constraint(equalToConstant: 60),
         ])
     }
 
-    // MARK: - 顶部菜单栏(横排,避开灵动岛)
+    // MARK: - 顶部圆形图标菜单
     private func setupMenu() {
-        let items: [(String, String, UIColor, Selector)] = [
-            ("👤", "角色", .diamond, #selector(openCharacter)),
-            ("🎒", "背包", .primary, #selector(openInventory)),
-            ("🎁", "抽奖", .accent, #selector(openGacha)),
-            ("🛒", "商店", .epic, #selector(openShop)),
-            ("🐲", "BOSS", .legend, #selector(openBoss)),
-            ("💎", "充值", .diamond, #selector(openRecharge)),
+        let items: [(String, UIColor, Selector)] = [
+            ("👤", .diamond, #selector(openCharacter)),
+            ("🎒", .primary, #selector(openInventory)),
+            ("🎁", .accent, #selector(openGacha)),
+            ("🛒", .epic, #selector(openShop)),
+            ("🐲", .legend, #selector(openBoss)),
+            ("💎", .diamond, #selector(openRecharge)),
         ]
         menuStack.translatesAutoresizingMaskIntoConstraints = false
         menuStack.axis = .horizontal
-        menuStack.spacing = 8
+        menuStack.spacing = 10
         menuStack.alignment = .center
         view.addSubview(menuStack)
 
-        for (icon, label, color, sel) in items {
-            let b = makeMenuButton(icon: icon, label: label, color: color)
+        for (icon, color, sel) in items {
+            let b = makeRoundMenuButton(icon: icon, color: color)
             b.addTarget(self, action: sel, for: .touchUpInside)
             menuStack.addArrangedSubview(b)
         }
 
-        // 退出按钮(放在菜单末尾)
         logoutBtn.translatesAutoresizingMaskIntoConstraints = false
         logoutBtn.setTitle("退出", for: .normal)
         logoutBtn.titleLabel?.font = .systemFont(ofSize: 10, weight: .medium)
@@ -234,39 +239,70 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         view.addSubview(logoutBtn)
 
         NSLayoutConstraint.activate([
-            menuStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            menuStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
             menuStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            menuStack.heightAnchor.constraint(equalToConstant: 42),
+            menuStack.heightAnchor.constraint(equalToConstant: 40),
             logoutBtn.centerYAnchor.constraint(equalTo: menuStack.centerYAnchor),
-            logoutBtn.leadingAnchor.constraint(equalTo: menuStack.trailingAnchor, constant: 10),
+            logoutBtn.leadingAnchor.constraint(equalTo: menuStack.trailingAnchor, constant: 8),
         ])
     }
 
-    private func makeMenuButton(icon: String, label: String, color: UIColor) -> UIButton {
+    private func makeRoundMenuButton(icon: String, color: UIColor) -> UIButton {
         let b = UIButton(type: .system)
         b.translatesAutoresizingMaskIntoConstraints = false
-        let stack = UIStackView()
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.axis = .vertical
-        stack.spacing = 1
-        stack.alignment = .center
-        let iconL = UILabel.make(icon, font: .systemFont(ofSize: 16), color: .white, alignment: .center)
-        let labelL = UILabel.make(label, font: .systemFont(ofSize: 9, weight: .semibold), color: .white, alignment: .center)
-        stack.addArrangedSubview(iconL)
-        stack.addArrangedSubview(labelL)
-        b.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: b.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: b.centerYAnchor),
-            b.widthAnchor.constraint(equalToConstant: 54),
-            b.heightAnchor.constraint(equalToConstant: 40),
-        ])
-        b.backgroundColor = color.withAlphaComponent(0.82)
-        b.layer.cornerRadius = 9
+        b.setTitle(icon, for: .normal)
+        b.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
+        b.backgroundColor = color.withAlphaComponent(0.85)
+        b.layer.cornerRadius = 19
         b.layer.borderColor = color.cgColor
-        b.layer.borderWidth = 1
+        b.layer.borderWidth = 1.2
         b.makeGlow(color, radius: 6, opacity: 0.4)
+        b.widthAnchor.constraint(equalToConstant: 38).isActive = true
+        b.heightAnchor.constraint(equalToConstant: 38).isActive = true
+        b.addTarget(self, action: #selector(menuTapSound), for: .touchUpInside)
         return b
+    }
+
+    @objc private func menuTapSound() { SoundManager.shared.play(.button) }
+
+    // MARK: - 左侧战果小气泡
+    private func setupBubbles() {
+        bubbleStack.translatesAutoresizingMaskIntoConstraints = false
+        bubbleStack.axis = .vertical
+        bubbleStack.alignment = .leading
+        bubbleStack.spacing = 6
+        view.addSubview(bubbleStack)
+        NSLayoutConstraint.activate([
+            bubbleStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            bubbleStack.topAnchor.constraint(equalTo: hudView.bottomAnchor, constant: 10),
+            bubbleStack.widthAnchor.constraint(equalToConstant: 200),
+        ])
+    }
+
+    /// 显示一条左侧小气泡(自动消失)
+    func showKillBubble(_ text: String, color: UIColor = .primary, icon: String = "✦") {
+        let b = UILabel.make(" \(icon) \(text) ", font: .systemFont(ofSize: 12, weight: .semibold), color: .white, alignment: .left)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.backgroundColor = UIColor.bgDark.withAlphaComponent(0.82)
+        b.layer.cornerRadius = 10
+        b.layer.masksToBounds = true
+        b.layer.borderColor = color.withAlphaComponent(0.6).cgColor
+        b.layer.borderWidth = 1
+        b.alpha = 0
+        b.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        bubbleStack.addArrangedSubview(b)
+        UIView.animate(withDuration: 0.2) { b.alpha = 1 } completion: { _ in
+            UIView.animate(withDuration: 0.4, delay: 2.2, options: []) { b.alpha = 0 } completion: { _ in
+                self.bubbleStack.removeArrangedSubview(b)
+                b.removeFromSuperview()
+            }
+        }
+        // 最多保留 5 条
+        while bubbleStack.arrangedSubviews.count > 5 {
+            let old = bubbleStack.arrangedSubviews.first!
+            bubbleStack.removeArrangedSubview(old)
+            old.removeFromSuperview()
+        }
     }
 
     // MARK: - 加载玩家
@@ -305,7 +341,6 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         let dt = lastTime == 0 ? 1/60 : Float(min(now - lastTime, 0.05))
         lastTime = now
         scene.update(deltaTime: dt)
-        // 更新小地图
         let pp = scene.playerNode.position
         let monsterData = scene.monsters.map { m -> (x: Float, z: Float, color: UIColor, isBoss: Bool, alive: Bool) in
             (m.node.position.x, m.node.position.z, m.color, m.isBoss, m.alive)
@@ -313,25 +348,33 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         minimap.update(playerX: pp.x, playerZ: pp.z, monsters: monsterData)
     }
 
-    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-        // CADisplayLink 已处理
-    }
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {}
 
-    // MARK: - 怪物点击
+    // MARK: - 怪物点击 / 视角旋转
     @objc private func sceneTapped(_ g: UITapGestureRecognizer) {
-        guard !inBattle else { return }
+        guard !inBattle, !aoeInProgress else { return }
         let p = g.location(in: scnView)
         if let idx = scene.hitTestMonster(at: p, in: scnView) {
             startBattleWithMonster(idx: idx)
         }
     }
 
+    @objc private func scenePanned(_ g: UIPanGestureRecognizer) {
+        guard g.state == .changed || g.state == .began else { return }
+        let t = g.translation(in: scnView)
+        let yaw = Float(t.x) * 0.005
+        scene.orbitCamera(deltaYaw: yaw)
+        g.setTranslation(.zero, in: scnView)
+    }
+
     @objc private func attackNearest() {
-        guard !inBattle else { return }
+        guard !inBattle, !aoeInProgress else { return }
+        SoundManager.shared.play(.button)
         if let idx = nearestAliveMonsterIdx() {
             startBattleWithMonster(idx: idx)
         } else {
             showToast("附近没有怪物", isError: true)
+            SoundManager.shared.play(.error)
         }
     }
 
@@ -340,17 +383,16 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         guard scene.monsters.indices.contains(idx), scene.monsters[idx].alive else { return }
         inBattle = true
         let m = scene.monsters[idx]
-        showBattleHint("战斗中: \(m.name) Lv.\(m.level)")
 
         let handler: (Result<BattleResult, APIError>) -> Void = { [weak self] res in
             guard let self = self else { return }
-            self.hideBattleHint()
             switch res {
             case .success(let r):
                 self.playBattle(result: r, monsterIdx: idx)
             case .failure(let err):
                 self.inBattle = false
                 self.showToast(err.errorDescription ?? "战斗失败", isError: true)
+                SoundManager.shared.play(.error)
             }
         }
         if m.isBoss, let bid = m.bossId {
@@ -361,56 +403,36 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
     }
 
     private func playBattle(result: BattleResult, monsterIdx: Int) {
-        // 模拟玩家剩余血量百分比
-        let php = (playerInfo?.totalHp ?? 1) > 0 ? result.hpLeft / (playerInfo?.totalHp ?? 1) : 0
         let monsterHp = result.win ? CGFloat(0) : max(0.05, 1 - CGFloat(result.rounds)/10)
         let pAtk = playerInfo?.totalAtk ?? 20
         scene.playBattleAnimation(monsterIdx: monsterIdx, win: result.win, rounds: result.rounds, monsterHpPct: monsterHp, playerAtk: pAtk) { [weak self] in
             guard let self = self else { return }
             self.inBattle = false
-            // 飘字
+            // 3D 飘字战果
             if result.win {
                 let mp = self.scene.monsters[monsterIdx].node.position
                 self.scene.showFloatText("+\(result.expGain) EXP", color: .gold, at: SCNVector3(mp.x, 3, mp.z))
                 if result.goldGain > 0 {
                     self.scene.showFloatText("+\(result.goldGain) 金币", color: .gold, at: SCNVector3(mp.x+1, 2.5, mp.z))
+                    SoundManager.shared.play(.coin)
                 }
                 if result.diamondGain > 0 {
                     self.scene.showFloatText("+\(result.diamondGain) 钻石", color: .diamond, at: SCNVector3(mp.x-1, 2.5, mp.z))
                 }
                 for lv in result.leveledUp {
                     self.scene.showFloatText("升级 Lv.\(lv)!", color: .myth, at: SCNVector3(mp.x, 4, mp.z))
-                    // 升级金光粒子(在玩家位置)
                     let pp = self.scene.playerNode.position
                     self.scene.spawnLevelUpBurst(at: SCNVector3(pp.x, 1, pp.z))
+                    SoundManager.shared.play(.levelup)
                 }
+                // 左侧小气泡战果
+                self.showKillBubble("击杀 \(result.enemyName)  +\(result.expGain)经验", color: .gold, icon: "⚔")
+                if result.goldGain > 0 { self.showKillBubble("金币 +\(result.goldGain)", color: .gold, icon: "💰") }
+                if !result.drops.isEmpty { self.showKillBubble("掉落 \(result.drops.count) 件", color: .legend, icon: "🎁") }
+            } else {
+                self.showKillBubble("战斗失利,注意回血", color: .danger, icon: "⚠")
             }
-            // 更新玩家信息
             if let p = result.player { self.applyPlayer(p) }
-            // 战斗结果面板
-            let panel = BattleResultView(result: result, onClose: { })
-            self.presentPanel(panel)
-        }
-    }
-
-    private func showBattleHint(_ text: String) {
-        battleHintLabel.text = "  " + text + "  "
-        battleHintLabel.isHidden = false
-        UIView.animate(withDuration: 0.2) { self.battleHintLabel.alpha = 1 }
-    }
-    private func hideBattleHint() {
-        UIView.animate(withDuration: 0.2, animations: { self.battleHintLabel.alpha = 0 }) { _ in
-            self.battleHintLabel.isHidden = true
-        }
-    }
-
-    // MARK: - 回血
-    private func doHeal() {
-        APIClient.shared.heal { [weak self] res in
-            switch res {
-            case .success(let p): self?.applyPlayer(p); self?.showToast("已回满血")
-            case .failure(let err): self?.showToast(err.errorDescription ?? "失败", isError: true)
-            }
         }
     }
 
@@ -421,71 +443,146 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         present(vc, animated: true)
     }
 
-    @objc private func openInventory() { presentPanel(InventoryPanel { [weak self] p in self?.applyPlayer(p) }) }
-    @objc private func openGacha()    { presentPanel(GachaPanel { [weak self] p in self?.applyPlayer(p) }) }
-    @objc private func openShop()     { presentPanel(ShopPanel { [weak self] p in self?.applyPlayer(p) }) }
-    @objc private func openBoss()     { presentPanel(BossPanel { [weak self] result in
-        self?.dismiss(animated: true) {
-            // 显示 boss 战斗结果
-            self?.presentPanel(BattleResultView(result: result, onClose: {}))
-            if let p = result.player { self?.applyPlayer(p) }
-        }
-    }) }
-    @objc private func openRecharge() { presentPanel(RechargePanel()) }
-    @objc private func openCharacter() { presentPanel(CharacterPanel(player: playerInfo) { [weak self] p in self?.applyPlayer(p) }) }
+    @objc private func openInventory() { SoundManager.shared.play(.button); presentPanel(InventoryPanel { [weak self] p in self?.applyPlayer(p) }) }
+    @objc private func openGacha()    { SoundManager.shared.play(.button); presentPanel(GachaPanel { [weak self] p in self?.applyPlayer(p) }) }
+    @objc private func openShop()     { SoundManager.shared.play(.button); presentPanel(ShopPanel { [weak self] p in self?.applyPlayer(p) }) }
+    @objc private func openRecharge() { SoundManager.shared.play(.button); presentPanel(RechargePanel()) }
+    @objc private func openCharacter() { SoundManager.shared.play(.button); presentPanel(CharacterPanel(player: playerInfo) { [weak self] p in self?.applyPlayer(p) }) }
 
-    // MARK: - 技能
+    /// BOSS 跳转: 瞬移到场景内 BOSS 旁, 直接打 3D 战斗(有场景)
+    @objc private func openBoss() {
+        SoundManager.shared.play(.button)
+        guard let bossIdx = scene.monsters.firstIndex(where: { $0.isBoss && $0.alive }) else {
+            showToast("暂无可挑战的 BOSS", isError: true)
+            return
+        }
+        scene.teleportToMonster(idx: bossIdx)
+        showKillBubble("已传送至 BOSS 领地!", color: .legend, icon: "🐲")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.startBattleWithMonster(idx: bossIdx)
+        }
+    }
+
+    // MARK: - 技能(带 CD)
     @objc private func flameSkill() {
-        guard !inBattle, !flameCooldown else { return }
-        // 找最近怪
+        guard !inBattle, !aoeInProgress, isReady("flame") else { return }
+        SoundManager.shared.play(.skill)
         guard let idx = nearestAliveMonsterIdx() else { showToast("附近没有怪物", isError: true); return }
-        // 烈焰特效(在怪物位置)
         let mp = scene.monsters[idx].node.position
         scene.spawnFlameSkill(at: SCNVector3(mp.x, 1, mp.z))
         startCooldown(btn: flameBtn, key: "flame", duration: 8)
+        showKillBubble("烈焰斩!", color: .epic, icon: "🔥")
         startBattleWithMonster(idx: idx)
     }
 
+    /// 旋风斩 AOE: 真实命中范围内多只怪(顺序结算)
+    @objc private func aoeSkill() {
+        guard !inBattle, !aoeInProgress, isReady("aoe") else { return }
+        let pp = scene.playerNode.position
+        let center = SCNVector3(pp.x, 0.5, pp.z)
+        // 收集范围内活怪(最多4只)
+        let targets = scene.monsters.enumerated().filter { _, m in
+            m.alive && !m.isBoss && sqrt(pow(m.node.position.x - pp.x,2) + pow(m.node.position.z - pp.z,2)) < 5
+        }.prefix(4).map { $0.offset }
+        if targets.isEmpty {
+            showToast("附近没有可群攻的怪物", isError: true)
+            SoundManager.shared.play(.error)
+            return
+        }
+        SoundManager.shared.play(.skill)
+        scene.playAOESkill(centerPos: center)
+        startCooldown(btn: aoeBtn, key: "aoe", duration: 10)
+        showKillBubble("旋风斩! 命中\(targets.count)只", color: .legend, icon: "🌀")
+        aoeInProgress = true
+        // 玩家原地小跳劈
+        scene.playJumpSlash()
+        // 顺序结算每只
+        var remaining = targets
+        func nextKill() {
+            guard !remaining.isEmpty else {
+                self.aoeInProgress = false
+                return
+            }
+            let idx = remaining.removeFirst()
+            self.inBattle = true
+            let m = self.scene.monsters[idx]
+            APIClient.shared.fightWild(level: m.level) { res in
+                switch res {
+                case .success(let r):
+                    let mp = self.scene.monsters[idx].node.position
+                    if r.win {
+                        self.scene.showFloatText("\(r.expGain)EXP", color: .gold, at: SCNVector3(mp.x, 2.6, mp.z))
+                        self.scene.setMonsterHp(idx: idx, pct: 0)
+                        self.scene.spawnDeathBurst(at: SCNVector3(mp.x, 1.4, mp.z), color: m.color)
+                        self.scene.monsters[idx].node.runAction(SCNAction.sequence([
+                            SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.25),
+                            SCNAction.fadeOut(duration: 0.3),
+                            SCNAction.run { $0.isHidden = true },
+                        ]))
+                        self.scene.setMonsterAlive(idx: idx, alive: false)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                            guard let self = self, self.scene.monsters.indices.contains(idx) else { return }
+                            self.scene.respawnPublic(idx: idx)
+                        }
+                        self.showKillBubble("击杀 \(r.enemyName)", color: .gold, icon: "🌀")
+                    }
+                    if let p = r.player { self.applyPlayer(p) }
+                case .failure(_):
+                    break
+                }
+                self.inBattle = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { nextKill() }
+    }
+
     @objc private func healSkill() {
-        guard !healCooldown else { return }
+        guard isReady("heal") else { return }
+        SoundManager.shared.play(.heal)
         let pp = scene.playerNode.position
         scene.spawnHealEffect(at: SCNVector3(pp.x, 0.5, pp.z))
         startCooldown(btn: healBtn, key: "heal", duration: 15)
+        showKillBubble("治疗术!", color: UIColor(hex: 0x66bb6a), icon: "✨")
         APIClient.shared.heal { [weak self] res in
             switch res {
-            case .success(let p): self?.applyPlayer(p); self?.showToast("✨ 治疗术!已回满血")
+            case .success(let p): self?.applyPlayer(p)
             case .failure(let err): self?.showToast(err.errorDescription ?? "失败", isError: true)
             }
         }
     }
 
+    private func isReady(_ key: String) -> Bool {
+        if let t = cooldowns[key], t > Date().timeIntervalSince1970 { return false }
+        return true
+    }
+
     private func startCooldown(btn: UIButton, key: String, duration: TimeInterval) {
+        cooldowns[key] = Date().timeIntervalSince1970 + duration
         btn.isEnabled = false
         btn.alpha = 0.4
-        if key == "flame" { flameCooldown = true }
-        if key == "heal" { healCooldown = true }
         let t = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
             btn.isEnabled = true
             btn.alpha = 1
-            if key == "flame" { self?.flameCooldown = false }
-            if key == "heal" { self?.healCooldown = false }
+            self?.cooldowns.removeValue(forKey: key)
             self?.cooldownTimers.removeValue(forKey: key)
         }
         cooldownTimers[key] = t
     }
 
-    // MARK: - 自动战斗
+    // MARK: - 自动战斗(会用技能)
     @objc private func toggleAutoBattle() {
         autoBattle.toggle()
+        SoundManager.shared.play(.button)
         if autoBattle {
             autoBtn.backgroundColor = UIColor.danger.withAlphaComponent(0.8)
             autoBtn.layer.borderColor = UIColor.danger.cgColor
-            showToast("自动战斗: 开启")
+            showKillBubble("自动挂机: 开启", color: .danger, icon: "▶")
             startAutoBattle()
         } else {
             autoBtn.backgroundColor = UIColor(hex: 0x2a3040)
             autoBtn.layer.borderColor = UIColor(hex: 0x4a5568).cgColor
-            showToast("自动战斗: 关闭")
+            showKillBubble("自动挂机: 关闭", color: .common, icon: "■")
             autoTimer?.invalidate()
             autoTimer = nil
         }
@@ -493,10 +590,28 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
 
     private func startAutoBattle() {
         autoTimer?.invalidate()
-        autoTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            guard let self = self, self.autoBattle, !self.inBattle else { return }
+        autoTimer = Timer.scheduledTimer(withTimeInterval: 1.4, repeats: true) { [weak self] _ in
+            guard let self = self, self.autoBattle, !self.inBattle, !self.aoeInProgress else { return }
+            // 附近怪数量
+            let pp = self.scene.playerNode.position
+            let nearCount = self.scene.monsters.filter { m in
+                m.alive && sqrt(pow(m.node.position.x - pp.x,2) + pow(m.node.position.z - pp.z,2)) < 5
+            }.count
+            // 优先 AOE(多怪且就绪)
+            if nearCount >= 2 && self.isReady("aoe") {
+                self.aoeSkill(); return
+            }
+            // 其次烈焰
+            if self.isReady("flame"), self.nearestAliveMonsterIdx() != nil {
+                self.flameSkill(); return
+            }
+            // 普攻
             if let idx = self.nearestAliveMonsterIdx() {
                 self.startBattleWithMonster(idx: idx)
+            }
+            // 血量低自动治疗
+            if let p = self.playerInfo, p.totalHp > 0, p.curHp * 3 < p.totalHp, self.isReady("heal") {
+                self.healSkill()
             }
         }
     }
@@ -549,5 +664,12 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
                 t.removeFromSuperview()
             }
         }
+    }
+}
+
+// MARK: - 手势并存
+extension GameViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ g1: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith g2: UIGestureRecognizer) -> Bool {
+        return true
     }
 }
