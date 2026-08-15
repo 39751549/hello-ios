@@ -502,8 +502,9 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         scene.playJumpSlash()
         // 顺序结算每只(用 [weak self] 闭包,避免循环引用)
         var remaining = targets
-        // 先声明,nextKill 闭包内可递归引用
-        let nextKill: () -> Void = { [weak self] in
+        // 用 var Optional 让闭包能递归引用自身(let 会在声明前被捕获)
+        var nextKill: (() -> Void)?
+        nextKill = { [weak self] in
             guard let self = self else { return }
             guard !remaining.isEmpty else {
                 self.aoeInProgress = false
@@ -512,7 +513,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             let idx = remaining.removeFirst()
             // 二次校验: 怪物仍存活且索引有效
             guard self.scene.monsters.indices.contains(idx), self.scene.monsters[idx].alive else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
                 return
             }
             self.inBattle = true
@@ -524,7 +525,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
                 case .success(let r):
                     guard self.scene.monsters.indices.contains(idx) else {
                         self.inBattle = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
                         return
                     }
                     let mp = self.scene.monsters[idx].node.position
@@ -550,10 +551,10 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
                     break
                 }
                 self.inBattle = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { nextKill() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { nextKill?() }
     }
 
     @objc private func healSkill() {
