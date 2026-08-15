@@ -12,6 +12,10 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
     private let flameBtn = UIButton(type: .system)
     private let healBtn = UIButton(type: .system)
     private let aoeBtn = UIButton(type: .system)
+    private let iceBtn = UIButton(type: .system)
+    private let thunderBtn = UIButton(type: .system)
+    private let meteorBtn = UIButton(type: .system)
+    private let skillStack = UIStackView()
     private let autoBtn = UIButton(type: .system)
     private let minimap = MinimapView()
     private let menuStack = UIStackView()
@@ -26,6 +30,21 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
     private var autoTimer: Timer?
     private var cooldowns: [String: TimeInterval] = [:]   // key -> 可用时间戳
     private var cooldownTimers: [String: Timer] = [:]
+
+    /// 技能配置(图标/颜色/解锁等级)
+    private struct SkillConfig {
+        let icon: String
+        let color: UIColor
+        let unlockLevel: Int
+    }
+    private let skillConfigs: [String: SkillConfig] = [
+        "flame":   SkillConfig(icon: "🔥", color: .epic, unlockLevel: 1),
+        "aoe":     SkillConfig(icon: "🌀", color: .legend, unlockLevel: 1),
+        "heal":    SkillConfig(icon: "✨", color: UIColor(hex: 0x66bb6a), unlockLevel: 1),
+        "ice":     SkillConfig(icon: "❄️", color: UIColor(hex: 0x42a5f5), unlockLevel: 5),
+        "thunder": SkillConfig(icon: "⚡", color: UIColor(hex: 0xffeb3b), unlockLevel: 10),
+        "meteor":  SkillConfig(icon: "☄️", color: UIColor(hex: 0xff5722), unlockLevel: 15),
+    ]
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
     override var prefersStatusBarHidden: Bool { true }
@@ -147,41 +166,37 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         attackBtn.addTarget(self, action: #selector(attackNearest), for: .touchUpInside)
         view.addSubview(attackBtn)
 
-        // 烈焰斩(单体爆发, CD 8s)
-        flameBtn.translatesAutoresizingMaskIntoConstraints = false
-        flameBtn.setTitle("🔥", for: .normal)
-        flameBtn.titleLabel?.font = .systemFont(ofSize: 24, weight: .bold)
-        flameBtn.backgroundColor = UIColor.epic.withAlphaComponent(0.85)
-        flameBtn.layer.cornerRadius = 30
-        flameBtn.layer.borderColor = UIColor.epic.cgColor
-        flameBtn.layer.borderWidth = 2
-        flameBtn.makeGlow(.epic, radius: 10, opacity: 0.5)
-        flameBtn.addTarget(self, action: #selector(flameSkill), for: .touchUpInside)
-        view.addSubview(flameBtn)
+        // 技能按钮容器(横向排列6个技能,每个40x40)
+        skillStack.translatesAutoresizingMaskIntoConstraints = false
+        skillStack.axis = .horizontal
+        skillStack.alignment = .center
+        skillStack.spacing = 8
+        view.addSubview(skillStack)
 
-        // 旋风斩(AOE 群攻, CD 10s)
-        aoeBtn.translatesAutoresizingMaskIntoConstraints = false
-        aoeBtn.setTitle("🌀", for: .normal)
-        aoeBtn.titleLabel?.font = .systemFont(ofSize: 24, weight: .bold)
-        aoeBtn.backgroundColor = UIColor.legend.withAlphaComponent(0.85)
-        aoeBtn.layer.cornerRadius = 30
-        aoeBtn.layer.borderColor = UIColor.legend.cgColor
-        aoeBtn.layer.borderWidth = 2
-        aoeBtn.makeGlow(.legend, radius: 10, opacity: 0.5)
-        aoeBtn.addTarget(self, action: #selector(aoeSkill), for: .touchUpInside)
-        view.addSubview(aoeBtn)
-
-        // 治疗术(CD 15s)
-        healBtn.translatesAutoresizingMaskIntoConstraints = false
-        healBtn.setTitle("✨", for: .normal)
-        healBtn.titleLabel?.font = .systemFont(ofSize: 24, weight: .bold)
-        healBtn.backgroundColor = UIColor(hex: 0x66bb6a).withAlphaComponent(0.85)
-        healBtn.layer.cornerRadius = 30
-        healBtn.layer.borderColor = UIColor(hex: 0x66bb6a).cgColor
-        healBtn.layer.borderWidth = 2
-        healBtn.makeGlow(UIColor(hex: 0x66bb6a), radius: 10, opacity: 0.5)
-        healBtn.addTarget(self, action: #selector(healSkill), for: .touchUpInside)
-        view.addSubview(healBtn)
+        // 配置6个技能按钮: (按钮, key, selector)
+        let skillButtons: [(UIButton, String, Selector)] = [
+            (flameBtn,   "flame",   #selector(flameSkill)),
+            (aoeBtn,     "aoe",     #selector(aoeSkill)),
+            (healBtn,    "heal",    #selector(healSkill)),
+            (iceBtn,     "ice",     #selector(iceSkill)),
+            (thunderBtn, "thunder", #selector(thunderSkill)),
+            (meteorBtn,  "meteor",  #selector(meteorSkill)),
+        ]
+        for (btn, key, sel) in skillButtons {
+            guard let cfg = skillConfigs[key] else { continue }
+            btn.translatesAutoresizingMaskIntoConstraints = false
+            btn.setTitle(cfg.icon, for: .normal)
+            btn.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
+            btn.backgroundColor = cfg.color.withAlphaComponent(0.85)
+            btn.layer.cornerRadius = 20
+            btn.layer.borderColor = cfg.color.cgColor
+            btn.layer.borderWidth = 1.5
+            btn.makeGlow(cfg.color, radius: 8, opacity: 0.5)
+            btn.addTarget(self, action: sel, for: .touchUpInside)
+            btn.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            btn.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            skillStack.addArrangedSubview(btn)
+        }
 
         NSLayoutConstraint.activate([
             autoBtn.leadingAnchor.constraint(equalTo: joystick.trailingAnchor, constant: 10),
@@ -194,19 +209,12 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             attackBtn.widthAnchor.constraint(equalToConstant: 72),
             attackBtn.heightAnchor.constraint(equalToConstant: 72),
             // 技能横排在攻击按钮左侧
-            flameBtn.trailingAnchor.constraint(equalTo: attackBtn.leadingAnchor, constant: -12),
-            flameBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -32),
-            flameBtn.widthAnchor.constraint(equalToConstant: 60),
-            flameBtn.heightAnchor.constraint(equalToConstant: 60),
-            aoeBtn.trailingAnchor.constraint(equalTo: flameBtn.leadingAnchor, constant: -12),
-            aoeBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -32),
-            aoeBtn.widthAnchor.constraint(equalToConstant: 60),
-            aoeBtn.heightAnchor.constraint(equalToConstant: 60),
-            healBtn.trailingAnchor.constraint(equalTo: aoeBtn.leadingAnchor, constant: -12),
-            healBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -32),
-            healBtn.widthAnchor.constraint(equalToConstant: 60),
-            healBtn.heightAnchor.constraint(equalToConstant: 60),
+            skillStack.trailingAnchor.constraint(equalTo: attackBtn.leadingAnchor, constant: -12),
+            skillStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -28),
         ])
+
+        // 初始刷新技能解锁状态
+        refreshSkillUnlocks()
     }
 
     // MARK: - 顶部圆形图标菜单
@@ -322,6 +330,48 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         hudView.update(p)
         let pct = p.totalHp > 0 ? CGFloat(p.curHp) / CGFloat(p.totalHp) : 0
         scene.setPlayerHp(pct: pct)
+        // 玩家等级变化时刷新技能解锁状态
+        refreshSkillUnlocks()
+    }
+
+    // MARK: - 技能解锁
+    /// 检查技能是否已解锁(根据玩家等级)
+    private func isSkillUnlocked(_ key: String) -> Bool {
+        let playerLv = playerInfo?.level ?? 1
+        guard let cfg = skillConfigs[key] else { return false }
+        return playerLv >= cfg.unlockLevel
+    }
+
+    /// 刷新所有技能按钮的解锁状态(根据玩家等级)
+    private func refreshSkillUnlocks() {
+        let playerLv = playerInfo?.level ?? 1
+        let skillButtons: [(UIButton, String)] = [
+            (flameBtn, "flame"), (aoeBtn, "aoe"), (healBtn, "heal"),
+            (iceBtn, "ice"), (thunderBtn, "thunder"), (meteorBtn, "meteor")
+        ]
+        for (btn, key) in skillButtons {
+            guard let cfg = skillConfigs[key] else { continue }
+            if playerLv >= cfg.unlockLevel {
+                // 已解锁: 恢复图标和颜色
+                btn.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
+                btn.setTitle(cfg.icon, for: .normal)
+                btn.backgroundColor = cfg.color.withAlphaComponent(0.85)
+                btn.layer.borderColor = cfg.color.cgColor
+                // CD 状态由 startCooldown / CD timer 控制,仅就绪时恢复
+                if isReady(key) {
+                    btn.isEnabled = true
+                    btn.alpha = 1.0
+                }
+            } else {
+                // 未解锁: 锁图标 + 解锁等级,灰色不可点
+                btn.titleLabel?.font = .systemFont(ofSize: 11, weight: .bold)
+                btn.setTitle("🔒\(cfg.unlockLevel)", for: .normal)
+                btn.backgroundColor = UIColor(hex: 0x3a3a3a).withAlphaComponent(0.85)
+                btn.layer.borderColor = UIColor(hex: 0x555555).cgColor
+                btn.alpha = 0.5
+                btn.isEnabled = false
+            }
+        }
     }
 
     // MARK: - 渲染循环
@@ -575,6 +625,140 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         }
     }
 
+    // MARK: - 新增技能(冰封术/雷霆术/陨石术)
+
+    /// 冰封术(5级解锁, 法术攻击, 伤害=攻击力*2.5, CD 10s)
+    @objc private func iceSkill() {
+        guard !inBattle, !aoeInProgress, isReady("ice"), isSkillUnlocked("ice") else { return }
+        guard let idx = nearestAliveMonsterIdx() else {
+            showToast("附近没有怪物", isError: true)
+            SoundManager.shared.play(.error)
+            return
+        }
+        SoundManager.shared.play(.skill)
+        let mp = scene.monsters[idx].node.position
+        scene.spawnIceSkill(at: SCNVector3(mp.x, 1, mp.z))
+        // 本地伤害数字(攻击力 * 2.5)
+        let atk = playerInfo?.totalAtk ?? 20
+        let dmg = Int(Double(atk) * 2.5)
+        scene.showDamageNumber("\(dmg)", color: UIColor(hex: 0x42a5f5), at: SCNVector3(mp.x, 2, mp.z), scale: 1.4)
+        startCooldown(btn: iceBtn, key: "ice", duration: RemoteConfig.shared.iceCD)
+        showKillBubble("冰封术!", color: UIColor(hex: 0x42a5f5), icon: "❄️")
+        startBattleWithMonster(idx: idx)
+    }
+
+    /// 雷霆术(10级解锁, 法术攻击, 伤害=攻击力*3.5, CD 15s)
+    @objc private func thunderSkill() {
+        guard !inBattle, !aoeInProgress, isReady("thunder"), isSkillUnlocked("thunder") else { return }
+        guard let idx = nearestAliveMonsterIdx() else {
+            showToast("附近没有怪物", isError: true)
+            SoundManager.shared.play(.error)
+            return
+        }
+        SoundManager.shared.play(.skill)
+        let mp = scene.monsters[idx].node.position
+        scene.spawnThunderSkill(at: SCNVector3(mp.x, 1, mp.z))
+        // 本地伤害数字(攻击力 * 3.5)
+        let atk = playerInfo?.totalAtk ?? 20
+        let dmg = Int(Double(atk) * 3.5)
+        scene.showDamageNumber("\(dmg)", color: UIColor(hex: 0xffeb3b), at: SCNVector3(mp.x, 2, mp.z), scale: 1.5)
+        startCooldown(btn: thunderBtn, key: "thunder", duration: RemoteConfig.shared.thunderCD)
+        showKillBubble("雷霆术!", color: UIColor(hex: 0xffeb3b), icon: "⚡")
+        startBattleWithMonster(idx: idx)
+    }
+
+    /// 陨石术(15级解锁, 法术攻击 AOE, 伤害=攻击力*5, CD 20s)
+    @objc private func meteorSkill() {
+        guard !inBattle, !aoeInProgress, isReady("meteor"), isSkillUnlocked("meteor") else { return }
+        let pp = scene.playerNode.position
+        let center = SCNVector3(pp.x, 0.5, pp.z)
+        // 陨石术是 AOE,收集范围内怪物(最多5只)
+        let targets = scene.monsters.enumerated().filter { _, m in
+            m.alive && !m.isBoss && sqrt(pow(m.node.position.x - pp.x,2) + pow(m.node.position.z - pp.z,2)) < 6
+        }.prefix(5).map { $0.offset }
+        if targets.isEmpty {
+            showToast("附近没有可群攻的怪物", isError: true)
+            SoundManager.shared.play(.error)
+            return
+        }
+        SoundManager.shared.play(.skill)
+        scene.spawnMeteorSkill(at: center)
+        // 本地伤害数字(攻击力 * 5)
+        let atk = playerInfo?.totalAtk ?? 20
+        let dmg = Int(Double(atk) * 5)
+        for idx in targets {
+            let mp = scene.monsters[idx].node.position
+            scene.showDamageNumber("\(dmg)", color: UIColor(hex: 0xff5722), at: SCNVector3(mp.x, 2, mp.z), scale: 1.6)
+        }
+        startCooldown(btn: meteorBtn, key: "meteor", duration: RemoteConfig.shared.meteorCD)
+        showKillBubble("陨石术! 命中\(targets.count)只", color: UIColor(hex: 0xff5722), icon: "☄️")
+        aoeInProgress = true
+        // 顺序结算每只(复用 AOE 的逐只结算模式)
+        settleAOEKills(targets: targets, skillIcon: "☄️") { [weak self] in
+            self?.aoeInProgress = false
+        }
+    }
+
+    /// AOE 技能顺序结算多只怪物(陨石术/旋风斩复用)
+    private func settleAOEKills(targets: [Int], skillIcon: String, completion: @escaping () -> Void) {
+        var remaining = targets
+        // 用 var Optional 让闭包能递归引用自身
+        var nextKill: (() -> Void)?
+        nextKill = { [weak self] in
+            guard let self = self else { return }
+            guard !remaining.isEmpty else {
+                completion()
+                return
+            }
+            let idx = remaining.removeFirst()
+            // 二次校验: 怪物仍存活且索引有效
+            guard self.scene.monsters.indices.contains(idx), self.scene.monsters[idx].alive else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
+                return
+            }
+            self.inBattle = true
+            let m = self.scene.monsters[idx]
+            let mColor = m.color
+            APIClient.shared.fightWild(level: m.level) { [weak self] res in
+                guard let self = self else { return }
+                switch res {
+                case .success(let r):
+                    guard self.scene.monsters.indices.contains(idx) else {
+                        self.inBattle = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
+                        return
+                    }
+                    let mp = self.scene.monsters[idx].node.position
+                    if r.win {
+                        self.scene.showFloatText("\(r.expGain)EXP", color: .gold, at: SCNVector3(mp.x, 2.6, mp.z))
+                        self.scene.setMonsterHp(idx: idx, pct: 0)
+                        self.scene.spawnDeathBurst(at: SCNVector3(mp.x, 1.4, mp.z), color: mColor)
+                        self.scene.monsters[idx].node.runAction(SCNAction.sequence([
+                            SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.25),
+                            SCNAction.fadeOut(duration: 0.3),
+                            SCNAction.run { $0.isHidden = true },
+                        ]))
+                        self.scene.setMonsterAlive(idx: idx, alive: false)
+                        let respawnDelay = RemoteConfig.shared.monsterRespawnDelay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + respawnDelay) { [weak self] in
+                            guard let self = self, self.scene.monsters.indices.contains(idx) else { return }
+                            self.scene.respawnPublic(idx: idx)
+                        }
+                        self.showKillBubble("击杀 \(r.enemyName)", color: .gold, icon: skillIcon)
+                    }
+                    if let p = r.player { self.applyPlayer(p) }
+                case .failure(_):
+                    break
+                }
+                self.inBattle = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
+            }
+        }
+        // 等陨石落地爆炸后再开始结算
+        let delay = skillIcon == "☄️" ? 0.6 : 0.4
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { nextKill?() }
+    }
+
     private func isReady(_ key: String) -> Bool {
         if let t = cooldowns[key], t > Date().timeIntervalSince1970 { return false }
         return true
@@ -631,9 +815,21 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             let nearCount = self.scene.monsters.filter { m in
                 m.alive && sqrt(pow(m.node.position.x - pp.x,2) + pow(m.node.position.z - pp.z,2)) < 5
             }.count
-            // 优先 AOE(多怪且就绪)
+            // 优先陨石术(多怪且就绪且解锁)
+            if nearCount >= 3 && self.isReady("meteor") && self.isSkillUnlocked("meteor") {
+                self.meteorSkill(); return
+            }
+            // 其次 AOE(多怪且就绪)
             if nearCount >= 2 && self.isReady("aoe") {
                 self.aoeSkill(); return
+            }
+            // 雷霆术(单体高伤,就绪且解锁)
+            if self.isReady("thunder") && self.isSkillUnlocked("thunder"), self.nearestAliveMonsterIdx() != nil {
+                self.thunderSkill(); return
+            }
+            // 冰封术(就绪且解锁)
+            if self.isReady("ice") && self.isSkillUnlocked("ice"), self.nearestAliveMonsterIdx() != nil {
+                self.iceSkill(); return
             }
             // 其次烈焰
             if self.isReady("flame"), self.nearestAliveMonsterIdx() != nil {
