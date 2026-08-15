@@ -123,8 +123,8 @@ final class BattleResultView: UIViewController {
 
             cardView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             cardView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            cardView.widthAnchor.constraint(equalToConstant: 460),
-            cardView.heightAnchor.constraint(equalToConstant: 480),
+            cardView.widthAnchor.constraint(equalToConstant: 440),
+            cardView.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.86),
 
             titleLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 28),
             titleLabel.centerXAnchor.constraint(equalTo: cardView.centerXAnchor),
@@ -148,7 +148,7 @@ final class BattleResultView: UIViewController {
             logTextView.topAnchor.constraint(equalTo: lvlUpLabel.bottomAnchor, constant: 10),
             logTextView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 24),
             logTextView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -24),
-            logTextView.heightAnchor.constraint(equalToConstant: 120),
+            logTextView.heightAnchor.constraint(equalToConstant: 90),
 
             okBtn.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -22),
             okBtn.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 24),
