@@ -393,6 +393,104 @@ final class GameScene: SCNScene {
         spawnNodeParticles(at: pos, color: UIColor(hex: 0xffd54f), count: 15, speed: 4, duration: 0.6, size: 0.08, gravityY: 1)
     }
 
+    /// 冰封术特效(蓝色冰晶爆裂 + 冰冻扩散环)
+    func spawnIceSkill(at pos: SCNVector3) {
+        // 蓝色冰晶向上爆裂
+        spawnNodeParticles(at: pos, color: UIColor(hex: 0x42a5f5), count: 32, speed: 5, duration: 0.9, size: 0.14, gravityY: 2)
+        // 浅蓝小冰晶
+        spawnNodeParticles(at: pos, color: UIColor(hex: 0xe3f2fd), count: 18, speed: 3, duration: 0.7, size: 0.08, gravityY: 1)
+        // 冰冻扩散环
+        let ringGeo = SCNTorus(ringRadius: 0.3, pipeRadius: 0.08)
+        let ringMat = SCNMaterial()
+        ringMat.diffuse.contents = UIColor(hex: 0x42a5f5)
+        ringMat.emission.contents = UIColor(hex: 0x81d4fa)
+        ringMat.lightingModel = .constant
+        ringGeo.materials = [ringMat]
+        let ring = SCNNode(geometry: ringGeo)
+        ring.position = SCNVector3(pos.x, 0.3, pos.z)
+        ring.eulerAngles.x = Float.pi/2
+        rootNode.addChildNode(ring)
+        ring.runAction(SCNAction.sequence([
+            SCNAction.scale(to: 5, duration: 0.7),
+            SCNAction.fadeOut(duration: 0.3),
+            SCNAction.removeFromParentNode(),
+        ]))
+    }
+
+    /// 雷霆术特效(黄色雷电从天而降)
+    func spawnThunderSkill(at pos: SCNVector3) {
+        // 闪电柱(从天到地,瞬间出现)
+        let boltGeo = SCNCylinder(radius: 0.15, height: 14)
+        let boltMat = SCNMaterial()
+        boltMat.diffuse.contents = UIColor(hex: 0xffeb3b)
+        boltMat.emission.contents = UIColor(hex: 0xfff176)
+        boltMat.lightingModel = .constant
+        boltGeo.materials = [boltMat]
+        let bolt = SCNNode(geometry: boltGeo)
+        bolt.position = SCNVector3(pos.x, pos.y + 7, pos.z)
+        rootNode.addChildNode(bolt)
+        bolt.runAction(SCNAction.sequence([
+            SCNAction.fadeOpacity(to: 1, duration: 0.05),
+            SCNAction.wait(duration: 0.12),
+            SCNAction.fadeOut(duration: 0.2),
+            SCNAction.removeFromParentNode(),
+        ]))
+        // 落地黄色粒子爆裂
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self = self else { return }
+            self.spawnNodeParticles(at: pos, color: UIColor(hex: 0xffeb3b), count: 35, speed: 7, duration: 0.7, size: 0.12, gravityY: 1)
+            self.spawnNodeParticles(at: pos, color: UIColor(hex: 0xfff176), count: 20, speed: 4, duration: 0.5, size: 0.08, gravityY: 2)
+        }
+    }
+
+    /// 陨石术特效(红橙陨石从天而降, AOE)
+    func spawnMeteorSkill(at pos: SCNVector3) {
+        // 陨石本体(燃烧球体)从天而降
+        let meteorGeo = SCNSphere(radius: 0.5)
+        let meteorMat = SCNMaterial()
+        meteorMat.diffuse.contents = UIColor(hex: 0xff5722)
+        meteorMat.emission.contents = UIColor(hex: 0xff7043)
+        meteorMat.lightingModel = .constant
+        meteorGeo.materials = [meteorMat]
+        let meteor = SCNNode(geometry: meteorGeo)
+        meteor.position = SCNVector3(pos.x, pos.y + 14, pos.z)
+        rootNode.addChildNode(meteor)
+        // 坠落 + 旋转
+        let fall = SCNAction.move(to: SCNVector3(pos.x, pos.y + 0.5, pos.z), duration: 0.5)
+        fall.timingMode = .easeIn
+        let spin = SCNAction.repeatForever(SCNAction.rotateBy(x: CGFloat.pi*2, y: 0, z: 0, duration: 0.3))
+        meteor.runAction(SCNAction.group([fall, spin]))
+        // 拖尾粒子
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self else { return }
+            self.spawnNodeParticles(at: SCNVector3(pos.x, pos.y + 12, pos.z), color: UIColor(hex: 0xff5722), count: 30, speed: 1, duration: 0.4, size: 0.12, gravityY: -8)
+        }
+        // 落地大爆炸
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            meteor.removeFromParentNode()
+            self.spawnNodeParticles(at: pos, color: UIColor(hex: 0xff5722), count: 45, speed: 8, duration: 1.0, size: 0.16, gravityY: 2)
+            self.spawnNodeParticles(at: pos, color: UIColor(hex: 0xff9800), count: 25, speed: 5, duration: 0.8, size: 0.1, gravityY: 1)
+            self.spawnNodeParticles(at: pos, color: UIColor(hex: 0xffd54f), count: 15, speed: 6, duration: 0.6, size: 0.08, gravityY: 3)
+            // 大冲击波环
+            let ringGeo = SCNTorus(ringRadius: 0.4, pipeRadius: 0.12)
+            let ringMat = SCNMaterial()
+            ringMat.diffuse.contents = UIColor(hex: 0xff5722)
+            ringMat.emission.contents = UIColor(hex: 0xff7043)
+            ringMat.lightingModel = .constant
+            ringGeo.materials = [ringMat]
+            let ring = SCNNode(geometry: ringGeo)
+            ring.position = SCNVector3(pos.x, 0.3, pos.z)
+            ring.eulerAngles.x = Float.pi/2
+            self.rootNode.addChildNode(ring)
+            ring.runAction(SCNAction.sequence([
+                SCNAction.scale(to: 9, duration: 0.6),
+                SCNAction.fadeOut(duration: 0.3),
+                SCNAction.removeFromParentNode(),
+            ]))
+        }
+    }
+
     // MARK: - 玩家(关节骨骼模型)
     private func setupPlayer() {
         // 材质
@@ -702,23 +800,27 @@ final class GameScene: SCNScene {
         }
         monsters.removeAll()
 
-        // 6只普通怪 + 1只 boss
-        let wildConfigs: [(String, Int, UIColor)] = [
-            ("史莱姆", 1, UIColor(hex: 0x66bb6a)),
-            ("野狼", 3, UIColor(hex: 0x90a4ae)),
-            ("哥布林", 5, UIColor(hex: 0x8bc34a)),
-            ("蜘蛛", 8, UIColor(hex: 0x5c6bc0)),
-            ("骷髅兵", 10, UIColor(hex: 0xeceff1)),
-            ("石巨人", 12, UIColor(hex: 0x7e8a97)),
+        // 10只普通怪,等级随距离递增,颜色按等级分阶(白/绿/蓝/紫/橙)
+        // (name, level, color, radius) - radius 越大距离玩家越远,等级越高
+        let wildConfigs: [(String, Int, UIColor, Float)] = [
+            ("史莱姆",   1,  UIColor(hex: 0xeceff1), 5),    // 白色 - 近
+            ("野鼠",     2,  UIColor(hex: 0xeceff1), 5),    // 白色
+            ("野狼",     3,  UIColor(hex: 0xeceff1), 6),    // 白色
+            ("哥布林",   5,  UIColor(hex: 0x66bb6a), 8),    // 绿色
+            ("蜘蛛",     6,  UIColor(hex: 0x66bb6a), 9),    // 绿色
+            ("骷髅兵",   8,  UIColor(hex: 0x42a5f5), 11),   // 蓝色
+            ("石巨人",   9,  UIColor(hex: 0x42a5f5), 12),   // 蓝色
+            ("暗影骑士", 11, UIColor(hex: 0xab47bc), 14),   // 紫色
+            ("冰霜巨魔", 13, UIColor(hex: 0xab47bc), 15),   // 紫色
+            ("烈焰恶魔", 15, UIColor(hex: 0xff7043), 16),   // 橙色 - 远
         ]
-        for (i, (name, lvl, color)) in wildConfigs.enumerated() {
+        for (i, (name, lvl, color, r)) in wildConfigs.enumerated() {
             let angle = Float(i) / Float(wildConfigs.count) * Float.pi * 2
-            let r: Float = 7 + Float(i).truncatingRemainder(dividingBy: 3) * 2
             let pos = SCNVector3(cos(angle)*r, 0, sin(angle)*r)
             spawnMonster(name: name, level: lvl, color: color, pos: pos, isBoss: false, bossId: nil, scale: 1.0)
         }
-        // Boss 在角落
-        spawnMonster(name: "哥布林首领", level: 5, color: UIColor(hex: 0x558b2f), pos: SCNVector3(-14, 0, -14), isBoss: true, bossId: 1, scale: 1.6)
+        // Boss 在角落(等级最高,红色)
+        spawnMonster(name: "哥布林首领", level: 20, color: UIColor(hex: 0x558b2f), pos: SCNVector3(-14, 0, -14), isBoss: true, bossId: 1, scale: 1.6)
     }
 
     private func spawnMonster(name: String, level: Int, color: UIColor, pos: SCNVector3, isBoss: Bool, bossId: Int?, scale: Float) {
