@@ -127,6 +127,44 @@ def init_gm(db):
         db.commit()
 
 
+# ============ 默认游戏配置(云更新) ============
+# (key, value, desc) —— 客户端启动拉取 /api/config,同名 key 覆盖本地默认
+DEFAULT_GAME_CONFIG = [
+    # 技能 CD(秒)
+    ("skill_flame_cd",   "8",   "烈焰斩冷却(秒)"),
+    ("skill_aoe_cd",     "10",  "旋风斩冷却(秒)"),
+    ("skill_heal_cd",    "15",  "治疗术冷却(秒)"),
+    # 移动 / 战斗
+    ("player_move_speed","4.0", "玩家移动速度"),
+    ("monster_respawn",  "5",   "怪物重生间隔(秒)"),
+    ("auto_battle_interval", "1.4", "自动挂机攻击间隔(秒)"),
+    # 数值
+    ("exp_reward_mult",  "1.0", "经验奖励倍率"),
+    ("gold_reward_mult", "1.0", "金币奖励倍率"),
+    # 功能开关
+    ("feature_sound",    "1",   "音效开关 1=开 0=关"),
+    ("feature_auto_battle", "1", "自动挂机开关 1=开 0=关"),
+    # 公告 / 文案
+    ("notice_text",      "欢迎来到幻域神兵!GM 后台可修改此公告。", "登录公告"),
+    # 客户端强制升级(>0 时弹窗提示去下载新版本,version_code 比较)
+    ("force_update_version", "0", "强制升级最低版本号(0=不强制)"),
+    ("update_url",       "",    "新版本下载地址(可留空)"),
+]
+
+
+def init_game_config(db):
+    """只插入缺失的 key,已存在的保留 GM 修改"""
+    existing = {c.key for c in db.query(models.GameConfig).all()}
+    added = 0
+    for key, value, desc in DEFAULT_GAME_CONFIG:
+        if key not in existing:
+            db.add(models.GameConfig(key=key, value=value, desc=desc))
+            added += 1
+    if added:
+        db.commit()
+    return added
+
+
 def init_all():
     print(">>> 创建数据表...")
     Base.metadata.create_all(bind=engine)
@@ -140,6 +178,8 @@ def init_all():
         print(f"   奖池: {db.query(models.GachaPool).count()} 个")
         init_gm(db)
         print(f"   GM账号: {db.query(models.GmUser).count()} 个")
+        added = init_game_config(db)
+        print(f"   游戏配置: {db.query(models.GameConfig).count()} 条 (新增 {added})")
         print(">>> 初始化完成")
     finally:
         db.close()
