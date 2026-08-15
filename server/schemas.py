@@ -101,6 +101,7 @@ class GachaResultItem(BaseModel):
     item: ItemInfo
     count: int
     is_new: bool = True
+    note: str = ""
 
 
 class GachaResult(BaseModel):
