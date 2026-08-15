@@ -23,10 +23,7 @@ jobs:
       - name: Install xcodeproj gem
         run: sudo gem install xcodeproj
 
-      - name: Install Pillow for icon generation
-        run: python3 -m pip install --user Pillow
-
-      - name: Generate app icon
+      - name: Generate app icon (pure stdlib, no Pillow)
         run: python3 make_icon.py
 
       - name: Generate Xcode project
