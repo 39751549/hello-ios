@@ -504,9 +504,9 @@ final class GameScene: SCNScene {
         // 护手
         let guardGeo = SCNBox(width: 0.2, height: 0.035, length: 0.05, chamferRadius: 0.008)
         guardGeo.materials = [goldMat]
-        let guard = SCNNode(geometry: guardGeo)
-        guard.position = SCNVector3(0, 0.0, 0)
-        swordNode.addChildNode(guard)
+        let guardNode = SCNNode(geometry: guardGeo)
+        guardNode.position = SCNVector3(0, 0.0, 0)
+        swordNode.addChildNode(guardNode)
         // 剑柄
         let hiltGeo = SCNCylinder(radius: 0.028, height: 0.14)
         hiltGeo.materials = [leatherMat]
