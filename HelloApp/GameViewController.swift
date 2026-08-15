@@ -500,9 +500,10 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         aoeInProgress = true
         // 玩家原地小跳劈
         scene.playJumpSlash()
-        // 顺序结算每只
+        // 顺序结算每只(用 [weak self] 闭包,避免循环引用)
         var remaining = targets
-        func nextKill() {
+        // 先声明,nextKill 闭包内可递归引用
+        let nextKill: () -> Void = { [weak self] in
             guard let self = self else { return }
             guard !remaining.isEmpty else {
                 self.aoeInProgress = false
@@ -552,10 +553,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard self != nil else { return }
-            nextKill()
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { nextKill() }
     }
 
     @objc private func healSkill() {
