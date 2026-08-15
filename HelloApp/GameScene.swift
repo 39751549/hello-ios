@@ -30,7 +30,11 @@ final class GameScene: SCNScene {
 
     // 移动控制
     private var moveVector = SIMD2<Float>(0, 0)
-    private let moveSpeed: Float = 4.0
+    /// 移动速度(由 RemoteConfig 提供,云更新可调)
+    private var moveSpeed: Float {
+        let v = RemoteConfig.shared.moveSpeed
+        return v > 0 ? v : 4.0
+    }
 
     var onPlayerMove: ((SCNVector3) -> Void)?
     var onMonsterTapped: ((MonsterEntity) -> Void)?
@@ -903,7 +907,10 @@ final class GameScene: SCNScene {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                 SoundManager.shared.play(.hit)
             }
-            m.node.childNodes.first?.runAction(blink)
+            // 只对 body 子节点(第一个子节点)播闪烁,若已无子节点则跳过
+            if let bodyNode = m.node.childNodes.first {
+                bodyNode.runAction(blink)
+            }
             self.spawnHitSparks(at: monsterTop, color: m.color)
             let dmg1 = max(1, playerAtk + Int.random(in: -5...15))
             self.showDamageNumber("\(dmg1)", color: .white, at: monsterTop, scale: 1.0)
@@ -911,8 +918,10 @@ final class GameScene: SCNScene {
             let segments = min(max(rounds, 1), 3)
             for i in 1..<segments {
                 let delay = TimeInterval(i) * 0.18
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                    guard self.monsters.indices.contains(monsterIdx), self.monsters[monsterIdx].alive || win else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self = self else { return }
+                    guard self.monsters.indices.contains(monsterIdx) else { return }
+                    guard self.monsters[monsterIdx].alive || win else { return }
                     self.spawnHitSparks(at: monsterTop, color: m.color)
                     SoundManager.shared.play(.hit)
                     let dmg = max(1, playerAtk + Int.random(in: -8...20))
@@ -936,29 +945,37 @@ final class GameScene: SCNScene {
         back.timingMode = .easeInEaseOut
 
         playerNode.runAction(SCNAction.sequence([rush, SCNAction.group([hitImpact, hop]), SCNAction.wait(duration: 0.4), back])) { [weak self] in
-            guard let self = self else { completion(); return }
-            self.isBusy = false
-            if win {
-                SoundManager.shared.play(.death)
-                self.spawnDeathBurst(at: monsterTop, color: m.color)
-                self.spawnDeathBurst(at: monsterTop, color: .gold)
-                let fall = SCNAction.sequence([
-                    SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.3),
-                    SCNAction.fadeOut(duration: 0.35),
-                    SCNAction.run { node in node.isHidden = true }
-                ])
-                m.node.runAction(fall) { [weak self] in
-                    guard let self = self else { completion(); return }
-                    if self.monsters.indices.contains(monsterIdx) {
-                        self.monsters[monsterIdx].alive = false
+            // SCNAction 完成回调线程不保证是主线程,统一切回主线程
+            DispatchQueue.main.async {
+                guard let self = self else { completion(); return }
+                self.isBusy = false
+                if win {
+                    SoundManager.shared.play(.death)
+                    self.spawnDeathBurst(at: monsterTop, color: m.color)
+                    self.spawnDeathBurst(at: monsterTop, color: .gold)
+                    let fall = SCNAction.sequence([
+                        SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.3),
+                        SCNAction.fadeOut(duration: 0.35),
+                        SCNAction.run { node in node.isHidden = true }
+                    ])
+                    m.node.runAction(fall) { [weak self] in
+                        // 再次切回主线程(完成回调可能仍在渲染线程)
+                        DispatchQueue.main.async {
+                            guard let self = self else { completion(); return }
+                            if self.monsters.indices.contains(monsterIdx) {
+                                self.monsters[monsterIdx].alive = false
+                            }
+                            let delay = RemoteConfig.shared.monsterRespawnDelay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                                guard let self = self, self.monsters.indices.contains(monsterIdx) else { return }
+                                self.respawn(monsterIdx: monsterIdx)
+                            }
+                            completion()
+                        }
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-                        self?.respawn(monsterIdx: monsterIdx)
-                    }
-                    DispatchQueue.main.async { completion() }
+                } else {
+                    completion()
                 }
-            } else {
-                DispatchQueue.main.async { completion() }
             }
         }
     }
