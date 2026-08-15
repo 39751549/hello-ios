@@ -27,8 +27,9 @@ final class GachaPanel: BasePanel {
     override func setupContent() {
         super.setupContent()
         poolStack.translatesAutoresizingMaskIntoConstraints = false
-        poolStack.axis = .vertical
+        poolStack.axis = .horizontal
         poolStack.spacing = 10
+        poolStack.distribution = .fillEqually
         cardView.addSubview(poolStack)
 
         drawBtn1.translatesAutoresizingMaskIntoConstraints = false
@@ -38,7 +39,7 @@ final class GachaPanel: BasePanel {
         let btnStack = UIStackView(arrangedSubviews: [drawBtn1, drawBtn10])
         btnStack.translatesAutoresizingMaskIntoConstraints = false
         btnStack.axis = .horizontal
-        btnStack.spacing = 12
+        btnStack.spacing = 16
         btnStack.distribution = .fillEqually
         cardView.addSubview(btnStack)
 
@@ -53,25 +54,28 @@ final class GachaPanel: BasePanel {
         resultCollection.alwaysBounceVertical = false
         cardView.addSubview(resultCollection)
 
-        let hintLabel = UILabel.make("点击下方奖池选择,抽到的物品会显示在右侧", font: .systemFont(ofSize: 11), color: UIColor(hex: 0x6b7a8f))
+        let hintLabel = UILabel.make("选择奖池后点击抽取,抽到的物品显示在下方", font: .systemFont(ofSize: 11), color: UIColor(hex: 0x6b7a8f))
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         cardView.addSubview(hintLabel)
 
         NSLayoutConstraint.activate([
-            hintLabel.topAnchor.constraint(equalTo: contentTopAnchor, constant: 8),
+            hintLabel.topAnchor.constraint(equalTo: contentTopAnchor, constant: 6),
             hintLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 24),
-            poolStack.topAnchor.constraint(equalTo: hintLabel.bottomAnchor, constant: 10),
-            poolStack.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 24),
-            poolStack.widthAnchor.constraint(equalToConstant: 280),
 
-            btnStack.topAnchor.constraint(equalTo: poolStack.bottomAnchor, constant: 20),
-            btnStack.leadingAnchor.constraint(equalTo: poolStack.leadingAnchor),
-            btnStack.trailingAnchor.constraint(equalTo: poolStack.trailingAnchor),
+            poolStack.topAnchor.constraint(equalTo: hintLabel.bottomAnchor, constant: 8),
+            poolStack.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 20),
+            poolStack.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -20),
+            poolStack.heightAnchor.constraint(equalToConstant: 56),
 
-            resultCollection.topAnchor.constraint(equalTo: contentTopAnchor, constant: 10),
-            resultCollection.leadingAnchor.constraint(equalTo: poolStack.trailingAnchor, constant: 24),
-            resultCollection.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -24),
-            resultCollection.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -20),
+            btnStack.topAnchor.constraint(equalTo: poolStack.bottomAnchor, constant: 12),
+            btnStack.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 20),
+            btnStack.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -20),
+            btnStack.heightAnchor.constraint(equalToConstant: 40),
+
+            resultCollection.topAnchor.constraint(equalTo: btnStack.bottomAnchor, constant: 12),
+            resultCollection.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 20),
+            resultCollection.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -20),
+            resultCollection.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -16),
         ])
         loadPools()
     }
@@ -95,20 +99,17 @@ final class GachaPanel: BasePanel {
             let b = UIButton(type: .system)
             b.translatesAutoresizingMaskIntoConstraints = false
             b.titleLabel?.numberOfLines = 2
-            b.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
-            b.contentHorizontalAlignment = .left
-            b.titleEdgeInsets = UIEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+            b.titleLabel?.font = .systemFont(ofSize: 11, weight: .semibold)
+            b.titleLabel?.textAlignment = .center
             let costColor = pool.costType == "gold" ? UIColor.gold : UIColor.diamond
             let attr = NSMutableAttributedString()
-            attr.append(NSAttributedString(string: pool.name + "\n", attributes: [.foregroundColor: UIColor.white, .font: UIFont.systemFont(ofSize: 14, weight: .bold)]))
-            attr.append(NSAttributedString(string: "单抽 \(pool.costOnce) · 十连 \(pool.costTen) " + (pool.costType == "gold" ? "💰" : "💎"), attributes: [.foregroundColor: costColor, .font: UIFont.systemFont(ofSize: 11, weight: .medium)]))
-            attr.append(NSAttributedString(string: "\n\(pool.desc)", attributes: [.foregroundColor: UIColor(hex: 0x8b9bb4), .font: UIFont.systemFont(ofSize: 10)]))
+            attr.append(NSAttributedString(string: pool.name + "\n", attributes: [.foregroundColor: UIColor.white, .font: UIFont.systemFont(ofSize: 12, weight: .bold)]))
+            attr.append(NSAttributedString(string: "\(pool.costOnce)/\(pool.costTen) " + (pool.costType == "gold" ? "💰" : "💎"), attributes: [.foregroundColor: costColor, .font: UIFont.systemFont(ofSize: 10, weight: .medium)]))
             b.setAttributedTitle(attr, for: .normal)
             b.backgroundColor = UIColor(hex: 0x1a2030)
             b.layer.cornerRadius = 10
             b.layer.borderWidth = 1.5
             b.layer.borderColor = UIColor.clear.cgColor
-            b.heightAnchor.constraint(equalToConstant: 70).isActive = true
             b.tag = pool.id
             b.addTarget(self, action: #selector(poolTapped(_:)), for: .touchUpInside)
             poolStack.addArrangedSubview(b)
