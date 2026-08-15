@@ -362,8 +362,11 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
     @objc private func scenePanned(_ g: UIPanGestureRecognizer) {
         guard g.state == .changed || g.state == .began else { return }
         let t = g.translation(in: scnView)
-        let yaw = Float(t.x) * 0.005
-        scene.orbitCamera(deltaYaw: yaw)
+        // 左右滑动: 向右滑(t.x>0)期望视角向右转 → yaw 减小(摄像机向左绕)
+        let yaw = -Float(t.x) * 0.005
+        // 上下滑动: 向下滑(t.y>0)期望俯视 → pitch 增加
+        let pitch = Float(t.y) * 0.004
+        scene.orbitCamera(deltaYaw: yaw, deltaPitch: pitch)
         g.setTranslation(.zero, in: scnView)
     }
 
