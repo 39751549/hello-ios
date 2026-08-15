@@ -21,9 +21,8 @@ enum CrashReporter {
     /// 安装捕获器(应在 didFinishLaunching 最开始调用)
     static func install() {
         // 先把路径存到全局变量,供 C 回调访问
+        // 注意:不能在这里清空日志!上次崩溃的日志要留给 reportIfAny() 读取
         g_crashLogPath = crashPath
-        // 清空旧日志,确保本次启动后的崩溃日志是新的
-        try? FileManager.default.removeItem(atPath: g_crashLogPath)
 
         // 1) NSException(ObjC 异常, 部分 SceneKit/UIKit/AVAudioEngine 崩溃)
         //    必须是 @convention(c),不能捕获上下文 → 只能访问全局变量
