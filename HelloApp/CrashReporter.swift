@@ -8,6 +8,8 @@ import Darwin
 
 // 全局变量:供 @convention(c) 回调访问(C 函数指针不能捕获上下文,只能访问全局)
 private var g_crashLogPath: String = ""
+/// NSException handler 是否已记录详细日志(避免 signal handler 覆盖)
+private var g_exceptionLogged: Bool = false
 
 enum CrashReporter {
 
@@ -20,21 +22,39 @@ enum CrashReporter {
     static func install() {
         // 先把路径存到全局变量,供 C 回调访问
         g_crashLogPath = crashPath
+        // 清空旧日志,确保本次启动后的崩溃日志是新的
+        try? FileManager.default.removeItem(atPath: g_crashLogPath)
 
-        // 1) NSException(ObjC 异常, 部分 SceneKit/UIKit 崩溃)
+        // 1) NSException(ObjC 异常, 部分 SceneKit/UIKit/AVAudioEngine 崩溃)
         //    必须是 @convention(c),不能捕获上下文 → 只能访问全局变量
         let exceptionHandler: @convention(c) (NSException) -> Void = { exc in
             let stack = exc.callStackSymbols.joined(separator: "\n")
-            let info = "[NSException] \(exc.name.rawValue)\nReason: \(exc.reason ?? "nil")\nStack:\n\(stack)\n"
+            let info = """
+            [NSException] \(exc.name.rawValue)
+            Reason: \(exc.reason ?? "nil")
+            Stack:
+            \(stack)
+            """
             try? info.write(toFile: g_crashLogPath, atomically: true, encoding: .utf8)
+            g_exceptionLogged = true
         }
         NSSetUncaughtExceptionHandler(exceptionHandler)
 
         // 2) 信号(Swift fatalError / 强解包 / 越界 多为 SIGTRAP/SIGABRT)
+        //    追加写入,不覆盖 NSException handler 写的详细日志
         let signalHandler: @convention(c) (Int32) -> Void = { sig in
             let stack = Thread.callStackSymbols.joined(separator: "\n")
-            let info = "[Signal \(sig)]\nStack:\n\(stack)\n"
-            try? info.write(toFile: g_crashLogPath, atomically: true, encoding: .utf8)
+            let info = "\n\n=== [Signal \(sig)] ===\nStack:\n\(stack)\n"
+            // 追加写入:若文件已存在(NSException 已记录),追加 signal 栈
+            if FileManager.default.fileExists(atPath: g_crashLogPath),
+               let fh = try? FileHandle(forWritingTo: URL(fileURLWithPath: g_crashLogPath)) {
+                fh.seekToEndOfFile()
+                if let data = info.data(using: .utf8) { fh.write(data) }
+                try? fh.close()
+            } else {
+                // 文件不存在(无 NSException),直接写
+                try? info.write(toFile: g_crashLogPath, atomically: true, encoding: .utf8)
+            }
             _exit(sig)
         }
         for s in [SIGABRT, SIGILL, SIGTRAP, SIGSEGV, SIGBUS, SIGFPE, SIGPIPE] {
