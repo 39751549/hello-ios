@@ -5,6 +5,10 @@ import Darwin
 /// 崩溃捕获器: 拦截 NSException + 信号(SIGTRAP/SIGABRT/SIGSEGV...),
 /// 把堆栈写入 Documents/last_crash.txt, 下次启动弹窗显示并上报服务器。
 /// 这样无需连 Xcode 也能拿到崩溃堆栈。
+
+// 全局变量:供 @convention(c) 回调访问(C 函数指针不能捕获上下文,只能访问全局)
+private var g_crashLogPath: String = ""
+
 enum CrashReporter {
 
     static var crashPath: String {
@@ -14,21 +18,27 @@ enum CrashReporter {
 
     /// 安装捕获器(应在 didFinishLaunching 最开始调用)
     static func install() {
+        // 先把路径存到全局变量,供 C 回调访问
+        g_crashLogPath = crashPath
+
         // 1) NSException(ObjC 异常, 部分 SceneKit/UIKit 崩溃)
-        NSSetUncaughtExceptionHandler { exc in
+        //    必须是 @convention(c),不能捕获上下文 → 只能访问全局变量
+        let exceptionHandler: @convention(c) (NSException) -> Void = { exc in
             let stack = exc.callStackSymbols.joined(separator: "\n")
             let info = "[NSException] \(exc.name.rawValue)\nReason: \(exc.reason ?? "nil")\nStack:\n\(stack)\n"
-            try? info.write(toFile: crashPath, atomically: true, encoding: .utf8)
+            try? info.write(toFile: g_crashLogPath, atomically: true, encoding: .utf8)
         }
+        NSSetUncaughtExceptionHandler(exceptionHandler)
+
         // 2) 信号(Swift fatalError / 强解包 / 越界 多为 SIGTRAP/SIGABRT)
-        let handler: @convention(c) (Int32) -> Void = { sig in
+        let signalHandler: @convention(c) (Int32) -> Void = { sig in
             let stack = Thread.callStackSymbols.joined(separator: "\n")
             let info = "[Signal \(sig)]\nStack:\n\(stack)\n"
-            try? info.write(toFile: CrashReporter.crashPath, atomically: true, encoding: .utf8)
+            try? info.write(toFile: g_crashLogPath, atomically: true, encoding: .utf8)
             _exit(sig)
         }
         for s in [SIGABRT, SIGILL, SIGTRAP, SIGSEGV, SIGBUS, SIGFPE, SIGPIPE] {
-            signal(s, handler)
+            signal(s, signalHandler)
         }
     }
 
