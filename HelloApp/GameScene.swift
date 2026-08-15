@@ -44,6 +44,9 @@ final class GameScene: SCNScene {
     override init() {
         super.init()
         background.contents = gradientImage()
+        // PBR 环境光照(让 physicallyBased 材质有反射,否则全黑)
+        lightingEnvironment.contents = makeEnvMap()
+        lightingEnvironment.intensity = 1.2
         setupLighting()
         setupGround()
         setupSkyAndClouds()
@@ -61,6 +64,21 @@ final class GameScene: SCNScene {
             let colors = [UIColor(hex: 0x1a2b4a).cgColor, UIColor(hex: 0x0a0f1c).cgColor] as CFArray
             let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
             ctx.cgContext.drawLinearGradient(g, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
+        }
+    }
+
+    /// PBR 环境贴图(简易球面渐变,提供反射光)
+    private func makeEnvMap() -> UIImage {
+        let size = CGSize(width: 256, height: 128)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            let cg = ctx.cgContext
+            // 上半:天空暖光 / 下半:地面反射
+            let sky = [UIColor(hex: 0x6b8db5).cgColor, UIColor(hex: 0x2a3a5a).cgColor] as CFArray
+            let g1 = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: sky, locations: [0, 1])!
+            cg.drawLinearGradient(g1, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: size.height * 0.6), options: [])
+            let ground = [UIColor(hex: 0x3a3a2a).cgColor, UIColor(hex: 0x1a1a14).cgColor] as CFArray
+            let g2 = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: ground, locations: [0, 1])!
+            cg.drawLinearGradient(g2, start: CGPoint(x: 0, y: size.height * 0.6), end: CGPoint(x: 0, y: size.height), options: [])
         }
     }
 
@@ -356,59 +374,164 @@ final class GameScene: SCNScene {
 
     // MARK: - 玩家
     private func setupPlayer() {
-        // 身体
-        let bodyGeo = SCNCapsule(capRadius: 0.35, height: 1.2)
-        let m = SCNMaterial()
-        m.diffuse.contents = UIColor.primary
-        m.emission.contents = UIColor.primary.withAlphaComponent(0.25)
-        m.roughness.contents = 0.5
-        m.lightingModel = .physicallyBased
-        bodyGeo.materials = [m]
+        // 铠甲材质(蓝金金属感)
+        let armorMat = SCNMaterial()
+        armorMat.diffuse.contents = UIColor.primary
+        armorMat.emission.contents = UIColor.primary.withAlphaComponent(0.12)
+        armorMat.metalness.contents = 0.7
+        armorMat.roughness.contents = 0.3
+        armorMat.lightingModel = .physicallyBased
+
+        // 皮肤材质
+        let skinMat = SCNMaterial()
+        skinMat.diffuse.contents = UIColor(hex: 0xffe0b2)
+        skinMat.roughness.contents = 0.55
+        skinMat.lightingModel = .physicallyBased
+
+        // 深色皮革材质(腿/剑柄)
+        let leatherMat = SCNMaterial()
+        leatherMat.diffuse.contents = UIColor(hex: 0x37474f)
+        leatherMat.roughness.contents = 0.8
+        leatherMat.lightingModel = .physicallyBased
+
+        // 1) 躯干(铠甲) - 必须第一个添加,作为 attack 挥砍旋转体
+        let bodyGeo = SCNCapsule(capRadius: 0.3, height: 0.9)
+        bodyGeo.materials = [armorMat]
         let body = SCNNode(geometry: bodyGeo)
-        body.position = SCNVector3(0, 0.6, 0)
+        body.position = SCNVector3(0, 0.62, 0)
         body.castsShadow = true
-
-        // 头(球)
-        let headGeo = SCNSphere(radius: 0.28)
-        let hm = SCNMaterial()
-        hm.diffuse.contents = UIColor(hex: 0xffe0b2)
-        hm.roughness.contents = 0.6
-        hm.lightingModel = .physicallyBased
-        headGeo.materials = [hm]
-        let head = SCNNode(geometry: headGeo)
-        head.position = SCNVector3(0, 1.0, 0)
-        head.castsShadow = true
-
-        // 武器(简单长方体)
-        let swordGeo = SCNBox(width: 0.08, height: 1.0, length: 0.04, chamferRadius: 0)
-        let wm = SCNMaterial()
-        wm.diffuse.contents = UIColor(hex: 0xb0bec5)
-        wm.metalness.contents = 0.9
-        wm.roughness.contents = 0.2
-        wm.lightingModel = .physicallyBased
-        swordGeo.materials = [wm]
-        let sword = SCNNode(geometry: swordGeo)
-        sword.position = SCNVector3(0.42, 0.55, 0)
-        sword.eulerAngles = SCNVector3(0, 0, Float.pi/8)
-        sword.castsShadow = true
-
         playerNode.addChildNode(body)
+
+        // 2) 胸甲装饰(金色菱形)
+        let chestGeo = SCNBox(width: 0.22, height: 0.22, length: 0.06, chamferRadius: 0.02)
+        let goldMat = SCNMaterial()
+        goldMat.diffuse.contents = UIColor(hex: 0xffd54f)
+        goldMat.metalness.contents = 0.9
+        goldMat.roughness.contents = 0.2
+        goldMat.lightingModel = .physicallyBased
+        chestGeo.materials = [goldMat]
+        let chest = SCNNode(geometry: chestGeo)
+        chest.position = SCNVector3(0, 0.68, 0.26)
+        playerNode.addChildNode(chest)
+
+        // 3) 肩甲(左右)
+        let shoulderGeo = SCNSphere(radius: 0.16)
+        shoulderGeo.materials = [armorMat]
+        let lShoulder = SCNNode(geometry: shoulderGeo)
+        lShoulder.position = SCNVector3(-0.32, 0.92, 0)
+        lShoulder.castsShadow = true
+        playerNode.addChildNode(lShoulder)
+        let rShoulder = SCNNode(geometry: shoulderGeo)
+        rShoulder.position = SCNVector3(0.32, 0.92, 0)
+        rShoulder.castsShadow = true
+        playerNode.addChildNode(rShoulder)
+
+        // 4) 头部
+        let headGeo = SCNSphere(radius: 0.22)
+        headGeo.materials = [skinMat]
+        let head = SCNNode(geometry: headGeo)
+        head.position = SCNVector3(0, 1.12, 0)
+        head.castsShadow = true
         playerNode.addChildNode(head)
-        playerNode.addChildNode(sword)
+
+        // 5) 头盔(顶部半球)
+        let helmGeo = SCNSphere(radius: 0.25)
+        helmGeo.materials = [armorMat]
+        let helm = SCNNode(geometry: helmGeo)
+        helm.position = SCNVector3(0, 1.16, 0)
+        helm.scale = SCNVector3(1, 0.65, 1)
+        playerNode.addChildNode(helm)
+        // 头盔羽饰(金色尖)
+        let plumeGeo = SCNCone(topRadius: 0, bottomRadius: 0.05, height: 0.25)
+        plumeGeo.materials = [goldMat]
+        let plume = SCNNode(geometry: plumeGeo)
+        plume.position = SCNVector3(0, 1.42, 0)
+        playerNode.addChildNode(plume)
+
+        // 6) 左臂
+        let armGeo = SCNCapsule(capRadius: 0.09, height: 0.6)
+        armGeo.materials = [armorMat]
+        let leftArm = SCNNode(geometry: armGeo)
+        leftArm.position = SCNVector3(-0.36, 0.62, 0)
+        leftArm.castsShadow = true
+        playerNode.addChildNode(leftArm)
+
+        // 7) 右臂(持剑手)
+        let rightArm = SCNNode(geometry: armGeo)
+        rightArm.position = SCNVector3(0.36, 0.62, 0)
+        rightArm.castsShadow = true
+        playerNode.addChildNode(rightArm)
+
+        // 8) 左腿
+        let legGeo = SCNCapsule(capRadius: 0.11, height: 0.55)
+        legGeo.materials = [leatherMat]
+        let leftLeg = SCNNode(geometry: legGeo)
+        leftLeg.position = SCNVector3(-0.15, 0.08, 0)
+        leftLeg.castsShadow = true
+        playerNode.addChildNode(leftLeg)
+
+        // 9) 右腿
+        let rightLeg = SCNNode(geometry: legGeo)
+        rightLeg.position = SCNVector3(0.15, 0.08, 0)
+        rightLeg.castsShadow = true
+        playerNode.addChildNode(rightLeg)
+
+        // 10) 披风
+        let capeGeo = SCNBox(width: 0.48, height: 0.85, length: 0.03, chamferRadius: 0.02)
+        let capeMat = SCNMaterial()
+        capeMat.diffuse.contents = UIColor.danger.withAlphaComponent(0.92)
+        capeMat.emission.contents = UIColor.danger.withAlphaComponent(0.18)
+        capeMat.roughness.contents = 0.6
+        capeMat.lightingModel = .physicallyBased
+        capeGeo.materials = [capeMat]
+        let cape = SCNNode(geometry: capeGeo)
+        cape.position = SCNVector3(0, 0.68, -0.22)
+        cape.eulerAngles = SCNVector3(-0.12, 0, 0)
+        playerNode.addChildNode(cape)
+
+        // 11) 剑(刀身+护手+柄)
+        let swordNode = SCNNode()
+        let bladeGeo = SCNBox(width: 0.05, height: 0.85, length: 0.015, chamferRadius: 0.008)
+        let bladeMat = SCNMaterial()
+        bladeMat.diffuse.contents = UIColor(hex: 0xeceff1)
+        bladeMat.metalness.contents = 0.95
+        bladeMat.roughness.contents = 0.12
+        bladeMat.lightingModel = .physicallyBased
+        bladeGeo.materials = [bladeMat]
+        let blade = SCNNode(geometry: bladeGeo)
+        blade.position = SCNVector3(0, 0.42, 0)
+        swordNode.addChildNode(blade)
+        // 护手
+        let guardGeo = SCNBox(width: 0.2, height: 0.035, length: 0.05, chamferRadius: 0.008)
+        guardGeo.materials = [goldMat]
+        let guard = SCNNode(geometry: guardGeo)
+        guard.position = SCNVector3(0, 0.0, 0)
+        swordNode.addChildNode(guard)
+        // 剑柄
+        let hiltGeo = SCNCylinder(radius: 0.028, height: 0.14)
+        hiltGeo.materials = [leatherMat]
+        let hilt = SCNNode(geometry: hiltGeo)
+        hilt.position = SCNVector3(0, -0.1, 0)
+        swordNode.addChildNode(hilt)
+        swordNode.position = SCNVector3(0.40, 0.62, 0.12)
+        swordNode.eulerAngles = SCNVector3(0, 0, Float.pi/9)
+        swordNode.castsShadow = true
+        playerNode.addChildNode(swordNode)
+
         playerNode.position = SCNVector3(0, 0, 6)
         rootNode.addChildNode(playerNode)
 
         // 玩家头顶血条
-        setupHpBar(playerHpBar, fill: playerHpFill, width: playerHpWidth, color: .danger, parent: playerNode, yOffset: 1.6)
+        setupHpBar(playerHpBar, fill: playerHpFill, width: playerHpWidth, color: .danger, parent: playerNode, yOffset: 1.65)
 
         // 摄像机
         let cam = SCNCamera()
-        cam.fieldOfView = 60
+        cam.fieldOfView = 55
         cam.zNear = 0.1
         cam.zFar = 200
         cameraNode.camera = cam
-        cameraNode.position = SCNVector3(0, 8, 14)
-        cameraNode.eulerAngles = SCNVector3(-Float.pi/6, 0, 0)
+        cameraNode.position = SCNVector3(0, 7.5, 13)
+        cameraNode.eulerAngles = SCNVector3(-Float.pi/6.5, 0, 0)
         rootNode.addChildNode(cameraNode)
 
         // 玩家跟随点光源(温暖色调,营造氛围)
@@ -690,7 +813,8 @@ final class GameScene: SCNScene {
         let back = SCNAction.move(to: origPos, duration: 0.3)
         back.timingMode = .easeInEaseOut
 
-        playerNode.runAction(SCNAction.sequence([rush, hitImpact, SCNAction.wait(duration: 0.5), back])) {
+        playerNode.runAction(SCNAction.sequence([rush, hitImpact, SCNAction.wait(duration: 0.5), back])) { [weak self] in
+            guard let self = self else { completion(); return }
             if win {
                 // 死亡爆裂粒子
                 self.spawnDeathBurst(at: monsterTop, color: m.color)
@@ -698,19 +822,20 @@ final class GameScene: SCNScene {
                 let fall = SCNAction.sequence([
                     SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.3),
                     SCNAction.fadeOut(duration: 0.35),
-                    SCNAction.customAction(duration: 0) { node, _ in
-                        node.isHidden = true
-                    }
+                    SCNAction.run { node in node.isHidden = true }
                 ])
-                m.node.runAction(fall) {
-                    self.monsters[monsterIdx].alive = false
+                m.node.runAction(fall) { [weak self] in
+                    guard let self = self else { completion(); return }
+                    if self.monsters.indices.contains(monsterIdx) {
+                        self.monsters[monsterIdx].alive = false
+                    }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
                         self?.respawn(monsterIdx: monsterIdx)
                     }
-                    completion()
+                    DispatchQueue.main.async { completion() }
                 }
             } else {
-                completion()
+                DispatchQueue.main.async { completion() }
             }
         }
     }
