@@ -47,6 +47,7 @@ final class GameScene: SCNScene {
 
     // 摄像机轨道(可旋转视角)
     private var cameraYaw: Float = 0
+    private var cameraPitch: Float = 0.3  // 俯仰角(弧度),正值=俯视
     private let cameraDistance: Float = 13
     private let cameraHeight: Float = 7.8
 
@@ -587,20 +588,25 @@ final class GameScene: SCNScene {
         return joint
     }
 
-    /// 更新摄像机轨道位置
+    /// 更新摄像机轨道位置(球坐标: yaw 水平 + pitch 俯仰)
     func updateCameraPosition() {
         let p = playerNode.position
+        let horizDist = cameraDistance * cos(cameraPitch)
+        let vertOffset = cameraDistance * sin(cameraPitch)
         cameraNode.position = SCNVector3(
-            p.x + sin(cameraYaw) * cameraDistance,
-            cameraHeight,
-            p.z + cos(cameraYaw) * cameraDistance
+            p.x + horizDist * sin(cameraYaw),
+            cameraHeight + vertOffset,
+            p.z + horizDist * cos(cameraYaw)
         )
         lightNode.position = SCNVector3(p.x + sin(cameraYaw + Float.pi/4) * 12, 30, p.z + cos(cameraYaw + Float.pi/4) * 12)
     }
 
-    /// 手势旋转视角
-    func orbitCamera(deltaYaw: Float) {
+    /// 手势旋转视角(yaw 水平 + pitch 俯仰)
+    func orbitCamera(deltaYaw: Float, deltaPitch: Float) {
         cameraYaw += deltaYaw
+        cameraPitch += deltaPitch
+        // 限制俯仰角: 不能完全平视也不能完全俯视,避免穿地/穿顶
+        cameraPitch = max(-0.2, min(1.2, cameraPitch))
         updateCameraPosition()
     }
 
