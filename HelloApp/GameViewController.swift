@@ -405,12 +405,16 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
     private func playBattle(result: BattleResult, monsterIdx: Int) {
         let monsterHp = result.win ? CGFloat(0) : max(0.05, 1 - CGFloat(result.rounds)/10)
         let pAtk = playerInfo?.totalAtk ?? 20
+        // 提前缓存怪物位置,防止动画过程中 monsters 数组变化导致越界
+        let cachedMonsterPos: SCNVector3 = scene.monsters.indices.contains(monsterIdx)
+            ? scene.monsters[monsterIdx].node.position
+            : SCNVector3(0, 0, 0)
         scene.playBattleAnimation(monsterIdx: monsterIdx, win: result.win, rounds: result.rounds, monsterHpPct: monsterHp, playerAtk: pAtk) { [weak self] in
             guard let self = self else { return }
             self.inBattle = false
-            // 3D 飘字战果
+            // 3D 飘字战果(使用缓存位置,不依赖 monsters[idx] 仍有效)
             if result.win {
-                let mp = self.scene.monsters[monsterIdx].node.position
+                let mp = cachedMonsterPos
                 self.scene.showFloatText("+\(result.expGain) EXP", color: .gold, at: SCNVector3(mp.x, 3, mp.z))
                 if result.goldGain > 0 {
                     self.scene.showFloatText("+\(result.goldGain) 金币", color: .gold, at: SCNVector3(mp.x+1, 2.5, mp.z))
@@ -470,7 +474,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         guard let idx = nearestAliveMonsterIdx() else { showToast("附近没有怪物", isError: true); return }
         let mp = scene.monsters[idx].node.position
         scene.spawnFlameSkill(at: SCNVector3(mp.x, 1, mp.z))
-        startCooldown(btn: flameBtn, key: "flame", duration: 8)
+        startCooldown(btn: flameBtn, key: "flame", duration: RemoteConfig.shared.flameCD)
         showKillBubble("烈焰斩!", color: .epic, icon: "🔥")
         startBattleWithMonster(idx: idx)
     }
@@ -491,7 +495,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         }
         SoundManager.shared.play(.skill)
         scene.playAOESkill(centerPos: center)
-        startCooldown(btn: aoeBtn, key: "aoe", duration: 10)
+        startCooldown(btn: aoeBtn, key: "aoe", duration: RemoteConfig.shared.aoeCD)
         showKillBubble("旋风斩! 命中\(targets.count)只", color: .legend, icon: "🌀")
         aoeInProgress = true
         // 玩家原地小跳劈
@@ -499,28 +503,42 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         // 顺序结算每只
         var remaining = targets
         func nextKill() {
+            guard let self = self else { return }
             guard !remaining.isEmpty else {
                 self.aoeInProgress = false
                 return
             }
             let idx = remaining.removeFirst()
+            // 二次校验: 怪物仍存活且索引有效
+            guard self.scene.monsters.indices.contains(idx), self.scene.monsters[idx].alive else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
+                return
+            }
             self.inBattle = true
             let m = self.scene.monsters[idx]
-            APIClient.shared.fightWild(level: m.level) { res in
+            let mColor = m.color
+            APIClient.shared.fightWild(level: m.level) { [weak self] res in
+                guard let self = self else { return }
                 switch res {
                 case .success(let r):
+                    guard self.scene.monsters.indices.contains(idx) else {
+                        self.inBattle = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
+                        return
+                    }
                     let mp = self.scene.monsters[idx].node.position
                     if r.win {
                         self.scene.showFloatText("\(r.expGain)EXP", color: .gold, at: SCNVector3(mp.x, 2.6, mp.z))
                         self.scene.setMonsterHp(idx: idx, pct: 0)
-                        self.scene.spawnDeathBurst(at: SCNVector3(mp.x, 1.4, mp.z), color: m.color)
+                        self.scene.spawnDeathBurst(at: SCNVector3(mp.x, 1.4, mp.z), color: mColor)
                         self.scene.monsters[idx].node.runAction(SCNAction.sequence([
                             SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.25),
                             SCNAction.fadeOut(duration: 0.3),
                             SCNAction.run { $0.isHidden = true },
                         ]))
                         self.scene.setMonsterAlive(idx: idx, alive: false)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                        let respawnDelay = RemoteConfig.shared.monsterRespawnDelay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + respawnDelay) { [weak self] in
                             guard let self = self, self.scene.monsters.indices.contains(idx) else { return }
                             self.scene.respawnPublic(idx: idx)
                         }
@@ -534,7 +552,10 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill() }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { nextKill() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard self != nil else { return }
+            nextKill()
+        }
     }
 
     @objc private func healSkill() {
@@ -542,7 +563,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         SoundManager.shared.play(.heal)
         let pp = scene.playerNode.position
         scene.spawnHealEffect(at: SCNVector3(pp.x, 0.5, pp.z))
-        startCooldown(btn: healBtn, key: "heal", duration: 15)
+        startCooldown(btn: healBtn, key: "heal", duration: RemoteConfig.shared.healCD)
         showKillBubble("治疗术!", color: UIColor(hex: 0x66bb6a), icon: "✨")
         APIClient.shared.heal { [weak self] res in
             switch res {
@@ -590,8 +611,19 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
 
     private func startAutoBattle() {
         autoTimer?.invalidate()
-        autoTimer = Timer.scheduledTimer(withTimeInterval: 1.4, repeats: true) { [weak self] _ in
+        let interval = RemoteConfig.shared.autoBattleInterval
+        autoTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self = self, self.autoBattle, !self.inBattle, !self.aoeInProgress else { return }
+            // 云端开关:若 GM 关闭了自动挂机,直接停止
+            if !RemoteConfig.shared.autoBattleEnabled {
+                self.autoBattle = false
+                self.autoTimer?.invalidate()
+                self.autoTimer = nil
+                self.autoBtn.backgroundColor = UIColor(hex: 0x2a3040)
+                self.autoBtn.layer.borderColor = UIColor(hex: 0x4a5568).cgColor
+                self.showKillBubble("自动挂机已被 GM 关闭", color: .common, icon: "■")
+                return
+            }
             // 附近怪数量
             let pp = self.scene.playerNode.position
             let nearCount = self.scene.monsters.filter { m in
