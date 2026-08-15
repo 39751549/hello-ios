@@ -86,10 +86,10 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         hudView.onHeal = { [weak self] in self?.doHeal() }
 
         NSLayoutConstraint.activate([
-            hudView.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            hudView.topAnchor.constraint(equalTo: view.topAnchor, constant: 56),
             hudView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            hudView.widthAnchor.constraint(equalToConstant: 540),
-            hudView.heightAnchor.constraint(equalToConstant: 60),
+            hudView.widthAnchor.constraint(equalToConstant: 330),
+            hudView.heightAnchor.constraint(equalToConstant: 52),
         ])
 
         battleHintLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -101,20 +101,20 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         battleHintLabel.textAlignment = .center
         view.addSubview(battleHintLabel)
         NSLayoutConstraint.activate([
-            battleHintLabel.topAnchor.constraint(equalTo: hudView.bottomAnchor, constant: 12),
+            battleHintLabel.topAnchor.constraint(equalTo: hudView.bottomAnchor, constant: 8),
             battleHintLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            battleHintLabel.heightAnchor.constraint(equalToConstant: 30),
+            battleHintLabel.heightAnchor.constraint(equalToConstant: 28),
             battleHintLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
         ])
 
-        // 小地图(右上角)
+        // 小地图(右上角,避开灵动岛区域,下移)
         minimap.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(minimap)
         NSLayoutConstraint.activate([
-            minimap.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            minimap.topAnchor.constraint(equalTo: view.topAnchor, constant: 56),
             minimap.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            minimap.widthAnchor.constraint(equalToConstant: 110),
-            minimap.heightAnchor.constraint(equalToConstant: 110),
+            minimap.widthAnchor.constraint(equalToConstant: 92),
+            minimap.heightAnchor.constraint(equalToConstant: 92),
         ])
     }
 
@@ -203,7 +203,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         ])
     }
 
-    // MARK: - 右侧菜单
+    // MARK: - 顶部菜单栏(横排,避开灵动岛)
     private func setupMenu() {
         let items: [(String, String, UIColor, Selector)] = [
             ("👤", "角色", .diamond, #selector(openCharacter)),
@@ -214,7 +214,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             ("💎", "充值", .diamond, #selector(openRecharge)),
         ]
         menuStack.translatesAutoresizingMaskIntoConstraints = false
-        menuStack.axis = .vertical
+        menuStack.axis = .horizontal
         menuStack.spacing = 8
         menuStack.alignment = .center
         view.addSubview(menuStack)
@@ -225,18 +225,20 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             menuStack.addArrangedSubview(b)
         }
 
+        // 退出按钮(放在菜单末尾)
         logoutBtn.translatesAutoresizingMaskIntoConstraints = false
         logoutBtn.setTitle("退出", for: .normal)
-        logoutBtn.titleLabel?.font = .systemFont(ofSize: 11, weight: .medium)
+        logoutBtn.titleLabel?.font = .systemFont(ofSize: 10, weight: .medium)
         logoutBtn.setTitleColor(UIColor(hex: 0x8b9bb4), for: .normal)
         logoutBtn.addTarget(self, action: #selector(doLogout), for: .touchUpInside)
         view.addSubview(logoutBtn)
 
         NSLayoutConstraint.activate([
-            menuStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            menuStack.topAnchor.constraint(equalTo: minimap.bottomAnchor, constant: 14),
-            logoutBtn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            logoutBtn.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
+            menuStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            menuStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            menuStack.heightAnchor.constraint(equalToConstant: 42),
+            logoutBtn.centerYAnchor.constraint(equalTo: menuStack.centerYAnchor),
+            logoutBtn.leadingAnchor.constraint(equalTo: menuStack.trailingAnchor, constant: 10),
         ])
     }
 
@@ -245,22 +247,22 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         b.translatesAutoresizingMaskIntoConstraints = false
         let stack = UIStackView()
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.axis = .horizontal
-        stack.spacing = 5
+        stack.axis = .vertical
+        stack.spacing = 1
         stack.alignment = .center
-        let iconL = UILabel.make(icon, font: .systemFont(ofSize: 15), color: .white, alignment: .center)
-        let labelL = UILabel.make(label, font: .systemFont(ofSize: 11, weight: .semibold), color: .white)
+        let iconL = UILabel.make(icon, font: .systemFont(ofSize: 16), color: .white, alignment: .center)
+        let labelL = UILabel.make(label, font: .systemFont(ofSize: 9, weight: .semibold), color: .white, alignment: .center)
         stack.addArrangedSubview(iconL)
         stack.addArrangedSubview(labelL)
         b.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: b.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: b.centerYAnchor),
-            b.widthAnchor.constraint(equalToConstant: 72),
-            b.heightAnchor.constraint(equalToConstant: 30),
+            b.widthAnchor.constraint(equalToConstant: 54),
+            b.heightAnchor.constraint(equalToConstant: 40),
         ])
-        b.backgroundColor = color.withAlphaComponent(0.85)
-        b.layer.cornerRadius = 8
+        b.backgroundColor = color.withAlphaComponent(0.82)
+        b.layer.cornerRadius = 9
         b.layer.borderColor = color.cgColor
         b.layer.borderWidth = 1
         b.makeGlow(color, radius: 6, opacity: 0.4)
