@@ -2,26 +2,34 @@ import Foundation
 import AVFoundation
 
 /// 程序化音效系统(无需音频文件,实时合成)
+/// 注意: AVAudioEngine 非线程安全,所有引擎图操作(attach/connect/play/detach)
+/// 必须在主线程串行执行,否则并发修改会闪退。
 final class SoundManager {
     static let shared = SoundManager()
     private let engine = AVAudioEngine()
     private var enabled = true
+    private var started = false
 
     private init() {
-        // 预热引擎
+        // 预热引擎(主线程)
         do {
             try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true)
             try engine.start()
+            started = true
         } catch {
             print("[Sound] 引擎启动失败: \(error)")
+            started = false
         }
     }
 
     func setEnabled(_ on: Bool) {
         enabled = on
-        if on { try? engine.start() }
-        else { engine.pause() }
+        if on {
+            if !started { try? engine.start(); started = engine.isRunning }
+        } else {
+            engine.pause()
+        }
     }
 
     // MARK: - 音效类型
@@ -40,25 +48,25 @@ final class SoundManager {
 
     func play(_ sfx: SFX) {
         guard enabled else { return }
+        // 1) 后台合成 PCM buffer(纯 CPU 计算,不碰引擎)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.generate(sfx)
+            guard let self = self else { return }
+            let buffer = self.synthesize(sfx)
+            // 2) 引擎图操作切回主线程串行执行
+            DispatchQueue.main.async { [weak self] in
+                self?.playBuffer(buffer)
+            }
         }
     }
 
-    // MARK: - 合成
-    private func generate(_ sfx: SFX) {
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
-        let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
-
-        let sampleRate = 4410.0
+    // MARK: - 合成(可在任意线程,不接触 AVAudioEngine)
+    private func synthesize(_ sfx: SFX) -> AVAudioPCMBuffer? {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1) else { return nil }
         let frameCount: AVAudioFrameCount
         let fill: (UnsafeMutablePointer<Float>) -> Void
 
         switch sfx {
         case .attack:
-            // 短促"嗖"声 - 下行频率
             frameCount = 4400
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -69,7 +77,6 @@ final class SoundManager {
                 }
             }
         case .hit:
-            // 命中"啪" - 噪声+低频
             frameCount = 3000
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -81,7 +88,6 @@ final class SoundManager {
                 }
             }
         case .skill:
-            // 技能"呼" - 上行扫频
             frameCount = 8800
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -92,7 +98,6 @@ final class SoundManager {
                 }
             }
         case .aoe:
-            // AOE 爆炸 - 低频轰鸣
             frameCount = 13200
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -104,10 +109,9 @@ final class SoundManager {
                 }
             }
         case .levelup:
-            // 升级 - 上升音阶
             frameCount = 22000
             fill = { buf in
-                let notes: [Double] = [523, 659, 784, 1047]  // C E G C
+                let notes: [Double] = [523, 659, 784, 1047]
                 let noteLen = Int(frameCount) / notes.count
                 for i in 0..<Int(frameCount) {
                     let noteIdx = min(i / noteLen, notes.count - 1)
@@ -117,7 +121,6 @@ final class SoundManager {
                 }
             }
         case .coin:
-            // 金币"叮"
             frameCount = 6000
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -127,7 +130,6 @@ final class SoundManager {
                 }
             }
         case .death:
-            // 死亡 - 下降吼叫
             frameCount = 11000
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -138,7 +140,6 @@ final class SoundManager {
                 }
             }
         case .heal:
-            // 治疗 - 柔和上升
             frameCount = 10000
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -149,7 +150,6 @@ final class SoundManager {
                 }
             }
         case .button:
-            // 按钮点击
             frameCount = 1500
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -159,7 +159,6 @@ final class SoundManager {
                 }
             }
         case .error:
-            // 错误 - 低频蜂鸣
             frameCount = 8000
             fill = { buf in
                 for i in 0..<Int(frameCount) {
@@ -170,15 +169,23 @@ final class SoundManager {
             }
         }
 
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return nil }
         buffer.frameLength = frameCount
-        let channelData = buffer.floatChannelData![0]
-        fill(channelData)
+        guard let channelData = buffer.floatChannelData else { return nil }
+        fill(channelData[0])
+        return buffer
+    }
 
+    // MARK: - 播放(必须主线程)
+    private func playBuffer(_ buffer: AVAudioPCMBuffer?) {
+        guard let buffer = buffer, started, engine.isRunning else { return }
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: buffer.format)
         player.scheduleBuffer(buffer, completionHandler: nil)
         player.play()
-        // 播完后清理
-        DispatchQueue.main.asyncAfter(deadline: .now() + Double(frameCount) / 44100.0 + 0.1) { [weak self] in
+        let dur = Double(buffer.frameLength) / 44100.0 + 0.15
+        DispatchQueue.main.asyncAfter(deadline: .now() + dur) { [weak self] in
             player.stop()
             self?.engine.detach(player)
         }
