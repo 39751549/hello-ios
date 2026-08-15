@@ -28,11 +28,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // 启动后若有上次崩溃, 弹窗显示(崩溃优先,无崩溃才弹公告,避免冲突)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let vc = self?.window?.rootViewController else { return }
+            // 1) 优先检查强制更新
+            let minVer = RemoteConfig.shared.forceUpdateVersion
+            let updateURL = RemoteConfig.shared.updateURL
+            if minVer > Config.versionCode {
+                let alert = UIAlertController(
+                    title: "发现新版本 v\(minVer)",
+                    message: "当前版本 v\(Config.versionCode),请更新到最新版本。\n更新后可继续游戏。",
+                    preferredStyle: .alert
+                )
+                if !updateURL.isEmpty, let url = URL(string: updateURL) {
+                    alert.addAction(UIAlertAction(title: "去下载更新", style: .default) { _ in
+                        UIApplication.shared.open(url)
+                    })
+                    alert.addAction(UIAlertAction(title: "稍后", style: .cancel))
+                } else {
+                    alert.addAction(UIAlertAction(title: "知道了", style: .default))
+                }
+                vc.present(alert, animated: true)
+                return
+            }
+            // 2) 有崩溃日志:弹崩溃弹窗
             if CrashReporter.lastCrash() != nil {
-                // 有崩溃日志:只弹崩溃弹窗(用户点"清除并继续"后关闭)
                 CrashReporter.reportIfAny(in: vc)
             } else {
-                // 无崩溃:弹公告(云更新:GM 可在后台修改)
+                // 3) 无崩溃:弹公告
                 let notice = RemoteConfig.shared.noticeText
                 if !notice.isEmpty {
                     let alert = UIAlertController(title: "公告", message: notice, preferredStyle: .alert)
