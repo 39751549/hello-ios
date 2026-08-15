@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 
 import init_data
-from routers import auth, player, battle, gacha, shop, boss
+from routers import auth, player, battle, gacha, shop, boss, config
 from admin import gm
 
 
@@ -39,6 +39,7 @@ app.include_router(battle.router)
 app.include_router(gacha.router)
 app.include_router(shop.router)
 app.include_router(boss.router)
+app.include_router(config.router)
 app.include_router(gm.router)
 
 
