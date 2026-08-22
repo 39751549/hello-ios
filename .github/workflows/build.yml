@@ -23,8 +23,13 @@ jobs:
       - name: Install xcodeproj gem
         run: sudo gem install xcodeproj
 
-      - name: Generate app icon (pure stdlib, no Pillow)
-        run: python3 make_icon.py
+      - name: Generate app icon (skip if already provided)
+        run: |
+          if [ -f HelloApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png ]; then
+            echo "Using existing AppIcon-1024.png"
+          else
+            python3 make_icon.py
+          fi
 
       - name: Generate Xcode project
         run: ruby generate_project.rb
