@@ -82,7 +82,7 @@ final class GameScene: SCNScene {
         let size = CGSize(width: 256, height: 256)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
-            let colors = [UIColor(hex: 0x1a2b4a).cgColor, UIColor(hex: 0x0a0f1c).cgColor] as CFArray
+            let colors = [UIColor(hex: 0x1a2e1f).cgColor, UIColor(hex: 0x0a0f0c).cgColor] as CFArray
             let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
             ctx.cgContext.drawLinearGradient(g, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
         }
@@ -134,7 +134,7 @@ final class GameScene: SCNScene {
         // 雾效
         fogStartDistance = 30
         fogEndDistance = 70
-        fogColor = UIColor(hex: 0x0a0f1c)
+        fogColor = UIColor(hex: 0x0a0f0c)
     }
 
     private func setupGround() {
@@ -166,8 +166,8 @@ final class GameScene: SCNScene {
         for p in treePositions {
             addTree(at: SCNVector3(p.x, 0, p.y))
         }
-        // 装饰: 中心水晶
-        addCrystal(at: SCNVector3(0, 0, 0))
+        // 装饰: 中心金色雕像(Old Money 标志)
+        addGoldenMonument(at: SCNVector3(0, 0, 0))
     }
 
     private func makeGroundTexture() -> UIImage {
@@ -234,6 +234,43 @@ final class GameScene: SCNScene {
             cone.castsShadow = true
             rootNode.addChildNode(cone)
         }
+    }
+
+    private func addGoldenMonument(at pos: SCNVector3) {
+        let baseGeo = SCNCylinder(radius: 0.8, height: 0.25)
+        let baseMat = SCNMaterial()
+        baseMat.diffuse.contents = UIColor(hex: 0x37474f)
+        baseMat.metalness.contents = 0.8
+        baseMat.roughness.contents = 0.3
+        baseMat.lightingModel = .physicallyBased
+        baseGeo.materials = [baseMat]
+        let base = SCNNode(geometry: baseGeo)
+        base.position = SCNVector3(pos.x, 0.12, pos.z)
+        rootNode.addChildNode(base)
+
+        let pillarGeo = SCNCylinder(radius: 0.15, height: 1.4)
+        let goldMat = SCNMaterial()
+        goldMat.diffuse.contents = UIColor(hex: 0xffd54f)
+        goldMat.emission.contents = UIColor(hex: 0xc9a227).withAlphaComponent(0.5)
+        goldMat.metalness.contents = 0.95
+        goldMat.roughness.contents = 0.15
+        goldMat.lightingModel = .physicallyBased
+        pillarGeo.materials = [goldMat]
+        let pillar = SCNNode(geometry: pillarGeo)
+        pillar.position = SCNVector3(pos.x, 0.95, pos.z)
+        pillar.name = "monument"
+        pillar.runAction(SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 12)))
+        rootNode.addChildNode(pillar)
+
+        let orbGeo = SCNSphere(radius: 0.35)
+        orbGeo.materials = [goldMat]
+        let orb = SCNNode(geometry: orbGeo)
+        orb.position = SCNVector3(pos.x, 1.75, pos.z)
+        orb.runAction(SCNAction.repeatForever(SCNAction.sequence([
+            SCNAction.moveBy(x: 0, y: 0.15, z: 0, duration: 2),
+            SCNAction.moveBy(x: 0, y: -0.15, z: 0, duration: 2),
+        ])))
+        rootNode.addChildNode(orb)
     }
 
     private func addCrystal(at pos: SCNVector3) {
@@ -495,10 +532,10 @@ final class GameScene: SCNScene {
     private func setupPlayer() {
         // 材质
         let armorMat = SCNMaterial()
-        armorMat.diffuse.contents = UIColor.primary
-        armorMat.emission.contents = UIColor.primary.withAlphaComponent(0.12)
-        armorMat.metalness.contents = 0.7
-        armorMat.roughness.contents = 0.3
+        armorMat.diffuse.contents = UIColor(hex: 0x2e5e3a)
+        armorMat.emission.contents = UIColor(hex: 0x1a3d24).withAlphaComponent(0.2)
+        armorMat.metalness.contents = 0.6
+        armorMat.roughness.contents = 0.35
         armorMat.lightingModel = .physicallyBased
 
         let skinMat = SCNMaterial()
@@ -628,8 +665,8 @@ final class GameScene: SCNScene {
         // 7) 披风
         let capeGeo = SCNBox(width: 0.48, height: 0.85, length: 0.03, chamferRadius: 0.02)
         let capeMat = SCNMaterial()
-        capeMat.diffuse.contents = UIColor.danger.withAlphaComponent(0.92)
-        capeMat.emission.contents = UIColor.danger.withAlphaComponent(0.18)
+        capeMat.diffuse.contents = UIColor(hex: 0x8b0000).withAlphaComponent(0.92)
+        capeMat.emission.contents = UIColor(hex: 0x5c0000).withAlphaComponent(0.18)
         capeMat.roughness.contents = 0.6
         capeMat.lightingModel = .physicallyBased
         capeGeo.materials = [capeMat]
