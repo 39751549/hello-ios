@@ -16,13 +16,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         SoundManager.shared.setEnabled(RemoteConfig.shared.soundEnabled)
 
         let window = UIWindow(frame: UIScreen.main.bounds)
-        let root: UIViewController
-        if APIClient.shared.token != nil {
-            root = GameViewController()
-        } else {
-            root = AuthViewController()
-        }
-        window.rootViewController = root
+        window.rootViewController = SplashViewController()
         window.makeKeyAndVisible()
         self.window = window
         // 启动后若有上次崩溃, 弹窗显示(崩溃优先,无崩溃才弹公告,避免冲突)
