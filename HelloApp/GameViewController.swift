@@ -4,6 +4,9 @@ import SceneKit
 /// 游戏主界面
 final class GameViewController: UIViewController, SCNSceneRendererDelegate {
 
+    /// 单机模式(无需登录服务器)
+    var isOfflineMode = false
+
     private let scnView = SCNView()
     private let scene = GameScene()
     private let hudView = HUDView()
@@ -58,6 +61,9 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         setupMenu()
         setupBubbles()
         loadMe()
+        if isOfflineMode {
+            logoutBtn.setTitle("菜单", for: .normal)
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -315,6 +321,10 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
 
     // MARK: - 加载玩家
     private func loadMe() {
+        if isOfflineMode {
+            applyPlayer(LocalGameManager.shared.getPlayer())
+            return
+        }
         APIClient.shared.getMe { [weak self] res in
             switch res {
             case .success(let p):
@@ -448,7 +458,13 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
                 SoundManager.shared.play(.error)
             }
         }
-        if m.isBoss, let bid = m.bossId {
+        if isOfflineMode {
+            if m.isBoss, let bid = m.bossId {
+                LocalGameManager.shared.fightBoss(bossId: bid, completion: handler)
+            } else {
+                LocalGameManager.shared.fightWild(level: m.level, completion: handler)
+            }
+        } else if m.isBoss, let bid = m.bossId {
             APIClient.shared.fightBoss(bossId: bid, completion: handler)
         } else {
             APIClient.shared.fightWild(level: m.level, completion: handler)
@@ -500,10 +516,33 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         present(vc, animated: true)
     }
 
-    @objc private func openInventory() { SoundManager.shared.play(.button); presentPanel(InventoryPanel { [weak self] p in self?.applyPlayer(p) }) }
-    @objc private func openGacha()    { SoundManager.shared.play(.button); presentPanel(GachaPanel { [weak self] p in self?.applyPlayer(p) }) }
-    @objc private func openShop()     { SoundManager.shared.play(.button); presentPanel(ShopPanel { [weak self] p in self?.applyPlayer(p) }) }
-    @objc private func openRecharge() { SoundManager.shared.play(.button); presentPanel(RechargePanel()) }
+    @objc private func openInventory() {
+        guard onlineFeature("背包") else { return }
+        SoundManager.shared.play(.button)
+        presentPanel(InventoryPanel { [weak self] p in self?.applyPlayer(p) })
+    }
+    @objc private func openGacha() {
+        guard onlineFeature("抽奖") else { return }
+        SoundManager.shared.play(.button)
+        presentPanel(GachaPanel { [weak self] p in self?.applyPlayer(p) })
+    }
+    @objc private func openShop() {
+        guard onlineFeature("商店") else { return }
+        SoundManager.shared.play(.button)
+        presentPanel(ShopPanel { [weak self] p in self?.applyPlayer(p) })
+    }
+    @objc private func openRecharge() {
+        guard onlineFeature("充值") else { return }
+        SoundManager.shared.play(.button)
+        presentPanel(RechargePanel())
+    }
+
+    private func onlineFeature(_ name: String) -> Bool {
+        if !isOfflineMode { return true }
+        showToast("单机模式暂不支持\(name)", isError: true)
+        SoundManager.shared.play(.error)
+        return false
+    }
     @objc private func openCharacter() { SoundManager.shared.play(.button); presentPanel(CharacterPanel(player: playerInfo) { [weak self] p in self?.applyPlayer(p) }) }
 
     /// BOSS 跳转: 瞬移到场景内 BOSS 旁, 直接打 3D 战斗(有场景)
@@ -572,38 +611,7 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             self.inBattle = true
             let m = self.scene.monsters[idx]
             let mColor = m.color
-            APIClient.shared.fightWild(level: m.level) { [weak self] res in
-                guard let self = self else { return }
-                switch res {
-                case .success(let r):
-                    guard self.scene.monsters.indices.contains(idx) else {
-                        self.inBattle = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
-                        return
-                    }
-                    let mp = self.scene.monsters[idx].node.position
-                    if r.win {
-                        self.scene.showFloatText("\(r.expGain)EXP", color: .gold, at: SCNVector3(mp.x, 2.6, mp.z))
-                        self.scene.setMonsterHp(idx: idx, pct: 0)
-                        self.scene.spawnDeathBurst(at: SCNVector3(mp.x, 1.4, mp.z), color: mColor)
-                        self.scene.monsters[idx].node.runAction(SCNAction.sequence([
-                            SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.25),
-                            SCNAction.fadeOut(duration: 0.3),
-                            SCNAction.run { $0.isHidden = true },
-                        ]))
-                        self.scene.setMonsterAlive(idx: idx, alive: false)
-                        let respawnDelay = RemoteConfig.shared.monsterRespawnDelay
-                        DispatchQueue.main.asyncAfter(deadline: .now() + respawnDelay) { [weak self] in
-                            guard let self = self, self.scene.monsters.indices.contains(idx) else { return }
-                            self.scene.respawnPublic(idx: idx)
-                        }
-                        self.showKillBubble("击杀 \(r.enemyName)", color: .gold, icon: "🌀")
-                    }
-                    if let p = r.player { self.applyPlayer(p) }
-                case .failure(_):
-                    break
-                }
-                self.inBattle = false
+            self.fightWildAtIndex(idx, monsterColor: mColor, skillIcon: "🌀") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
             }
         }
@@ -617,11 +625,16 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
         scene.spawnHealEffect(at: SCNVector3(pp.x, 0.5, pp.z))
         startCooldown(btn: healBtn, key: "heal", duration: RemoteConfig.shared.healCD)
         showKillBubble("治疗术!", color: UIColor(hex: 0x66bb6a), icon: "✨")
-        APIClient.shared.heal { [weak self] res in
+        let healHandler: (Result<PlayerInfo, APIError>) -> Void = { [weak self] res in
             switch res {
             case .success(let p): self?.applyPlayer(p)
             case .failure(let err): self?.showToast(err.errorDescription ?? "失败", isError: true)
             }
+        }
+        if isOfflineMode {
+            LocalGameManager.shared.heal(completion: healHandler)
+        } else {
+            APIClient.shared.heal(completion: healHandler)
         }
     }
 
@@ -719,44 +732,62 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
             self.inBattle = true
             let m = self.scene.monsters[idx]
             let mColor = m.color
-            APIClient.shared.fightWild(level: m.level) { [weak self] res in
-                guard let self = self else { return }
-                switch res {
-                case .success(let r):
-                    guard self.scene.monsters.indices.contains(idx) else {
-                        self.inBattle = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
-                        return
-                    }
-                    let mp = self.scene.monsters[idx].node.position
-                    if r.win {
-                        self.scene.showFloatText("\(r.expGain)EXP", color: .gold, at: SCNVector3(mp.x, 2.6, mp.z))
-                        self.scene.setMonsterHp(idx: idx, pct: 0)
-                        self.scene.spawnDeathBurst(at: SCNVector3(mp.x, 1.4, mp.z), color: mColor)
-                        self.scene.monsters[idx].node.runAction(SCNAction.sequence([
-                            SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.25),
-                            SCNAction.fadeOut(duration: 0.3),
-                            SCNAction.run { $0.isHidden = true },
-                        ]))
-                        self.scene.setMonsterAlive(idx: idx, alive: false)
-                        let respawnDelay = RemoteConfig.shared.monsterRespawnDelay
-                        DispatchQueue.main.asyncAfter(deadline: .now() + respawnDelay) { [weak self] in
-                            guard let self = self, self.scene.monsters.indices.contains(idx) else { return }
-                            self.scene.respawnPublic(idx: idx)
-                        }
-                        self.showKillBubble("击杀 \(r.enemyName)", color: .gold, icon: skillIcon)
-                    }
-                    if let p = r.player { self.applyPlayer(p) }
-                case .failure(_):
-                    break
-                }
-                self.inBattle = false
+            self.fightWildAtIndex(idx, monsterColor: mColor, skillIcon: skillIcon) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { nextKill?() }
             }
         }
         // 等陨石落地爆炸后再开始结算
         let delay = skillIcon == "☄️" ? 0.6 : 0.4
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { nextKill?() }
+    }
+
+    /// AOE 逐只结算(兼容单机/在线)
+    private func fightWildAtIndex(_ idx: Int, monsterColor: UIColor, skillIcon: String, completion: @escaping () -> Void) {
+        guard scene.monsters.indices.contains(idx) else {
+            inBattle = false
+            completion()
+            return
+        }
+        let m = scene.monsters[idx]
+        let handler: (Result<BattleResult, APIError>) -> Void = { [weak self] res in
+            guard let self = self else { return }
+            switch res {
+            case .success(let r):
+                guard self.scene.monsters.indices.contains(idx) else {
+                    self.inBattle = false
+                    completion()
+                    return
+                }
+                let mp = self.scene.monsters[idx].node.position
+                if r.win {
+                    self.scene.showFloatText("\(r.expGain)EXP", color: .gold, at: SCNVector3(mp.x, 2.6, mp.z))
+                    self.scene.setMonsterHp(idx: idx, pct: 0)
+                    self.scene.spawnDeathBurst(at: SCNVector3(mp.x, 1.4, mp.z), color: monsterColor)
+                    self.scene.monsters[idx].node.runAction(SCNAction.sequence([
+                        SCNAction.rotateTo(x: CGFloat.pi/2, y: 0, z: 0, duration: 0.25),
+                        SCNAction.fadeOut(duration: 0.3),
+                        SCNAction.run { $0.isHidden = true },
+                    ]))
+                    self.scene.setMonsterAlive(idx: idx, alive: false)
+                    let respawnDelay = RemoteConfig.shared.monsterRespawnDelay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + respawnDelay) { [weak self] in
+                        guard let self = self, self.scene.monsters.indices.contains(idx) else { return }
+                        self.scene.respawnPublic(idx: idx)
+                    }
+                    self.showKillBubble("击杀 \(r.enemyName)", color: .gold, icon: skillIcon)
+                }
+                if let p = r.player { self.applyPlayer(p) }
+            case .failure(_):
+                break
+            }
+            self.inBattle = false
+            completion()
+        }
+        if isOfflineMode {
+            LocalGameManager.shared.fightWild(level: m.level, completion: handler)
+        } else {
+            APIClient.shared.fightWild(level: m.level, completion: handler)
+        }
     }
 
     private func isReady(_ key: String) -> Bool {
@@ -860,6 +891,15 @@ final class GameViewController: UIViewController, SCNSceneRendererDelegate {
     }
 
     @objc private func doLogout() {
+        if isOfflineMode {
+            let alert = UIAlertController(title: "返回主菜单", message: "确认返回主菜单?", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+            alert.addAction(UIAlertAction(title: "返回", style: .default) { _ in
+                self.dismiss(animated: true)
+            })
+            present(alert, animated: true)
+            return
+        }
         let alert = UIAlertController(title: "退出登录", message: "确认退出当前账号?", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         alert.addAction(UIAlertAction(title: "退出", style: .destructive) { _ in
