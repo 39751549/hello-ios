@@ -8,8 +8,8 @@ final class AuthViewController: UIViewController, UITextFieldDelegate {
 
     private let scrollView = UIScrollView()
     private let cardView = UIView()
-    private let titleLabel = UILabel.make("幻域·神兵", font: .systemFont(ofSize: 38, weight: .heavy), color: .white, alignment: .center)
-    private let subtitleLabel = UILabel.make("FANTASY REALM", font: .systemFont(ofSize: 12, weight: .medium), color: UIColor(hex: 0x6b7a8f), alignment: .center)
+    private let titleLabel = UILabel.make("OLD MONEY", font: .systemFont(ofSize: 38, weight: .heavy), color: UIColor(hex: 0xf5e6c8), alignment: .center)
+    private let subtitleLabel = UILabel.make("WEALTH · POWER · LEGACY", font: .systemFont(ofSize: 12, weight: .medium), color: UIColor(hex: 0xc9a227), alignment: .center)
     private let tabSeg = UISegmentedControl(items: ["登录", "注册"])
     private let userField = UITextField()
     private let passField = UITextField()
@@ -241,6 +241,7 @@ final class AuthViewController: UIViewController, UITextFieldDelegate {
 
     private func enterGame() {
         let gvc = GameViewController()
+        gvc.isOfflineMode = false
         gvc.modalPresentationStyle = .fullScreen
         present(gvc, animated: true) { [weak self] in
             self?.userField.text = nil
