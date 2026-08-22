@@ -24,7 +24,7 @@ enum Config {
 
     /// 客户端版本号(整数,每次发版+1)
     /// 与服务端 force_update_version 比较:当 force_update_version > versionCode 时弹更新提示
-    static let versionCode: Int = 3
+    static let versionCode: Int = 4
     /// 版本显示字符串
-    static let versionString = "1.0.3"
+    static let versionString = "1.1.0"
 }
