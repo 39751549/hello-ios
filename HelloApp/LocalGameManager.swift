@@ -134,7 +134,8 @@ final class LocalGameManager {
             killCount: p.killCount, bossKillCount: p.bossKillCount
         )
         save()
-        DispatchQueue.main.async { completion(.success(player!)) }
+        let healed = player!
+        DispatchQueue.main.async { completion(.success(healed)) }
     }
 
     // MARK: - 战斗核心
